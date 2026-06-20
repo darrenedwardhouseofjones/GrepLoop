@@ -1,0 +1,453 @@
+"use client";
+import { useState, useEffect } from "react";
+import type React from "react";
+import {
+  type ActivityLog,
+  type DbConfig,
+  type PRFile,
+  type PullRequest,
+  type Repository,
+  type ReviewFinding,
+} from "../lib/types";
+
+/**
+ * Single source of truth for the dashboard's data state, polling, and
+ * CRUD actions. App.tsx consumes this and only owns UI state
+ * (sidebar open/closed, active tab).
+ *
+ * The 2-second polling cadence on selectedRepoId / selectedPrId is
+ * pre-existing behavior — kept verbatim during extraction.
+ */
+export function useDashboardData() {
+  // ===== Database configuration =====
+  const [dbConfig, setDbConfig] = useState<DbConfig>({
+    dialect: "postgresql",
+    host: "localhost",
+    port: "",
+    username: "",
+    password: "",
+    database: "",
+    sqliteFile: "data.db",
+  });
+  const [dbTestResult, setDbTestResult] = useState<{ success: boolean; message: string } | null>(null);
+  const [dbSaveResult, setDbSaveResult] = useState<{ success: boolean; message: string } | null>(null);
+  const [isTestingDb, setIsTestingDb] = useState(false);
+  const [isSavingDb, setIsSavingDb] = useState(false);
+  const [dbStatus, setDbStatus] = useState<"configured" | "unconfigured" | "unknown">("unknown");
+
+  // ===== Repositories & PRs =====
+  const [repos, setRepos] = useState<Repository[]>([]);
+  const [selectedRepoId, setSelectedRepoId] = useState<string>("greploop-core");
+  const [prs, setPrs] = useState<PullRequest[]>([]);
+  const [selectedPrId, setSelectedPrId] = useState<string>("");
+  const [prFiles, setPrFiles] = useState<PRFile[]>([]);
+  const [selectedFilename, setSelectedFilename] = useState<string>("");
+  const [findings, setFindings] = useState<ReviewFinding[]>([]);
+  const [logs, setLogs] = useState<ActivityLog[]>([]);
+
+  // ===== Pluggable LLM router config =====
+  const [backendOption, setBackendOption] = useState<"local" | "cloud">("cloud");
+  const [localPort, setLocalPort] = useState<number>(11434);
+  const [localModel, setLocalModel] = useState<string>("codellama:13b");
+
+  // ===== Scan / UI feedback =====
+  const [isScanning, setIsScanning] = useState(false);
+  const [scanResult, setScanResult] = useState<{ count: number; model: string; notice?: string | null } | null>(null);
+  const [copyFeedback, setCopyFeedback] = useState<string | null>(null);
+
+  // ===== Add-repo modal form state =====
+  const [showAddRepoModal, setShowAddRepoModal] = useState(false);
+  const [newRepoName, setNewRepoName] = useState("");
+  const [newRepoPath, setNewRepoPath] = useState("");
+  const [newBaseBranch, setNewBaseBranch] = useState("main");
+  const [newTriggerMode, setNewTriggerMode] = useState<"auto" | "mention">("auto");
+  const [newQuietPeriod, setNewQuietPeriod] = useState(10);
+  const [newBranchPattern, setNewBranchPattern] = useState("feature/*");
+  const [errorFeedback, setErrorFeedback] = useState<string | null>(null);
+
+  // ===== Fetchers =====
+  const fetchDbConfig = async () => {
+    try {
+      const res = await fetch("/api/db/config");
+      if (res.ok) {
+        const data = await res.json();
+        setDbConfig({
+          dialect: data.dialect || "postgresql",
+          host: data.host || "",
+          port: data.port || "",
+          username: data.username || "",
+          password: "",
+          database: data.database || "",
+          sqliteFile: data.sqliteFile || "data.db",
+        });
+        setDbStatus(data.configured ? "configured" : "unconfigured");
+      }
+    } catch (e) {
+      console.error("Failed loading database config:", e);
+    }
+  };
+
+  const fetchRepos = async () => {
+    try {
+      const res = await fetch("/api/repos");
+      const data = await res.json();
+      if (Array.isArray(data)) {
+        setRepos(data);
+        if (data.length > 0 && !selectedRepoId) {
+          setSelectedRepoId(data[0].id);
+        }
+      }
+    } catch (e) {
+      console.error("Failed loading repositories", e);
+    }
+  };
+
+  const fetchPrsForSelectedRepo = async (repoId: string, retainSelection = true) => {
+    try {
+      const res = await fetch(`/api/repos/${repoId}/prs`);
+      const data = await res.json();
+      if (Array.isArray(data)) {
+        setPrs(data);
+        if (data.length > 0) {
+          setSelectedPrId((prev) => {
+            if (retainSelection && prev && data.some((p: PullRequest) => p.id === prev)) {
+              return prev;
+            }
+            return data[0].id;
+          });
+        } else {
+          setSelectedPrId("");
+          setPrFiles([]);
+          setFindings([]);
+        }
+      }
+    } catch (e) {
+      console.error("Failed loading PR list for repo " + repoId, e);
+    }
+  };
+
+  const fetchPrDetails = async (prId: string) => {
+    if (!prId) return;
+    try {
+      const filesRes = await fetch(`/api/prs/${prId}/files`);
+      const filesData = await filesRes.json();
+      if (Array.isArray(filesData)) {
+        setPrFiles(filesData);
+        if (filesData.length > 0) {
+          setSelectedFilename((prev) => {
+            const stillExists = filesData.some((f: PRFile) => f.filename === prev);
+            return stillExists ? prev : filesData[0].filename;
+          });
+        } else {
+          setSelectedFilename("");
+        }
+      }
+
+      const findingsRes = await fetch(`/api/prs/${prId}/findings`);
+      const findingsData = await findingsRes.json();
+      if (Array.isArray(findingsData)) {
+        setFindings(findingsData);
+      }
+    } catch (e) {
+      console.error("Failed retrieving PR files/findings detailed block", e);
+    }
+  };
+
+  const fetchLogs = async () => {
+    try {
+      const res = await fetch("/api/reviews");
+      const data = await res.json();
+      if (Array.isArray(data)) {
+        const mappedLogs: ActivityLog[] = data.map((item: any) => ({
+          id: `review-${item.id}`,
+          action: item.status === "done" ? "AI Review Scanned" : "Daemon Initialized",
+          target: `${item.repoName} (${item.branch})`,
+          time: new Date(item.timestamp).toLocaleTimeString(),
+          status: "done",
+        }));
+        setLogs(mappedLogs);
+      }
+    } catch (e) {
+      console.error("Failed fetching review history logs", e);
+    }
+  };
+
+  // ===== Initial load + polling =====
+  useEffect(() => {
+    fetchRepos();
+    fetchLogs();
+    fetchDbConfig();
+  }, []);
+
+  useEffect(() => {
+    const initial = setTimeout(() => {
+      if (selectedRepoId) fetchPrsForSelectedRepo(selectedRepoId, true);
+      if (selectedPrId) fetchPrDetails(selectedPrId);
+    }, 50);
+
+    const poller = setInterval(() => {
+      fetchRepos();
+      fetchLogs();
+      if (selectedRepoId) fetchPrsForSelectedRepo(selectedRepoId, true);
+      if (selectedPrId) fetchPrDetails(selectedPrId);
+    }, 2000);
+
+    return () => {
+      clearTimeout(initial);
+      clearInterval(poller);
+    };
+  }, [selectedRepoId, selectedPrId]);
+
+  // ===== DB actions =====
+  const handleTestDbConnection = async () => {
+    setIsTestingDb(true);
+    setDbTestResult(null);
+    try {
+      const res = await fetch("/api/db/test", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(dbConfig),
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setDbTestResult({ success: true, message: "Connected. SELECT 1 returned successfully from the configured pool." });
+      } else {
+        setDbTestResult({ success: false, message: data.error || "Connection failed. Check the connection string, credentials, and network reachability." });
+      }
+    } catch (err: any) {
+      setDbTestResult({ success: false, message: "Network or Server Error: " + err.message });
+    } finally {
+      setIsTestingDb(false);
+    }
+  };
+
+  const handleSaveDbConfig = async () => {
+    setIsSavingDb(true);
+    setDbSaveResult(null);
+    try {
+      const res = await fetch("/api/db/config", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(dbConfig),
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        const msg = data.message || "Saved. Restart the dev server to apply.";
+        setDbSaveResult({ success: true, message: msg });
+        await fetchDbConfig();
+      } else {
+        setDbSaveResult({ success: false, message: data.error || "Failed applying config." });
+      }
+    } catch (err: any) {
+      setDbSaveResult({ success: false, message: "Network or Server Error: " + err.message });
+    } finally {
+      setIsSavingDb(false);
+    }
+  };
+
+  // ===== PR scan =====
+  const handleTriggerPrScan = async () => {
+    if (!selectedPrId) return;
+    setIsScanning(true);
+    setScanResult(null);
+
+    const activeRepoName = repos.find((r) => r.id === selectedRepoId)?.name || selectedRepoId;
+
+    try {
+      const res = await fetch(`/api/prs/${selectedPrId}/scan`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          backendOption,
+          localPort,
+          localModel,
+          repoId: activeRepoName,
+        }),
+      });
+
+      const result = await res.json();
+      if (res.ok) {
+        setScanResult({
+          count: result.findings?.length || 0,
+          model: result.usedModel,
+          notice: result.systemWarn,
+        });
+        await fetchPrDetails(selectedPrId);
+        await fetchRepos();
+        await fetchLogs();
+      } else {
+        alert("Pipeline Scan Error: " + (result.error || "Execution timeout"));
+      }
+    } catch (e: any) {
+      console.error("Scan dispatch crash", e);
+      alert("Pipeline Dispatch Crashed: " + e.message);
+    } finally {
+      setIsScanning(false);
+    }
+  };
+
+  // ===== Add repo =====
+  const handleAddRepo = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newRepoName.trim() || !newRepoPath.trim()) {
+      setErrorFeedback("Both Project Name and Directory Path are required.");
+      return;
+    }
+
+    try {
+      const res = await fetch("/api/repos", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: newRepoName.trim(),
+          path: newRepoPath.trim(),
+          baseBranch: newBaseBranch,
+          triggerMode: newTriggerMode,
+          quietPeriodSeconds: Number(newQuietPeriod),
+          branchPattern: newBranchPattern,
+        }),
+      });
+
+      const data = await res.json();
+      if (res.ok) {
+        setShowAddRepoModal(false);
+        setNewRepoName("");
+        setNewRepoPath("");
+        setErrorFeedback(null);
+        await fetchRepos();
+        setSelectedRepoId(data.id);
+        await fetchPrsForSelectedRepo(data.id, false);
+      } else {
+        setErrorFeedback(data.error || "Failed linking project.");
+      }
+    } catch (err: any) {
+      setErrorFeedback("Server connection lost: " + err.message);
+    }
+  };
+
+  // ===== Daemon callback =====
+  const handleTriggerReviewPass = () => {
+    fetchRepos();
+    fetchLogs();
+    if (selectedPrId) fetchPrDetails(selectedPrId);
+  };
+
+  // ===== Markdown export =====
+  const handleExportMarkdown = () => {
+    const activePr = prs.find((p) => p.id === selectedPrId);
+    const activeRepo = repos.find((r) => r.id === selectedRepoId);
+    if (!activePr || !activeRepo) return;
+
+    let mdContent = `# GrepLoop automated PR Code Review Summary Card\n\n`;
+    mdContent += `### System Details:\n`;
+    mdContent += `- **Project:** \`${activeRepo.name}\`\n`;
+    mdContent += `- **Pull Request:** \`${activePr.title}\`\n`;
+    mdContent += `- **Source Branch:** \`${activePr.sourceBranch}\` \`(${activePr.commitHash})\`\n`;
+    mdContent += `- **Target/Base Branch:** \`${activePr.targetBranch}\`\n`;
+    mdContent += `- **Author Name:** \`${activePr.author}\`\n`;
+    mdContent += `- **Scanned On (UTC):** \`${new Date().toISOString()}\`\n`;
+    mdContent += `- **Core Policy Stack:** Compliance GrepLoop Guard v4\n\n`;
+    mdContent += `--- \n\n`;
+
+    mdContent += `## Files Checked in Pull Request:\n`;
+    prFiles.forEach((file) => {
+      mdContent += `- **File:** \`${file.filename}\` (\`+${file.additions}\` additions, \`-${file.deletions}\` deletions)\n`;
+    });
+    mdContent += `\n`;
+
+    mdContent += `## Review Findings and Severity Alerts:\n\n`;
+
+    if (findings.length === 0) {
+      mdContent += `🎉 **Perfect PR Pass!** No bugs, performance leaks, or security vulnerabilities discovered for this diff block.\n`;
+    } else {
+      findings.forEach((find, idx) => {
+        mdContent += `### [${idx + 1}] Severity: **${find.severity.toUpperCase()}** • Category: **${find.category}**\n`;
+        mdContent += `- **Location:** \`${find.filename}\` (Line ${find.line})\n`;
+        mdContent += `- **Observation Detail:** ${find.explanation}\n`;
+        if (find.diffSuggestion) {
+          mdContent += `\n**Proposed Resolution:**\n`;
+          mdContent += `\`\`\`rust\n${find.diffSuggestion}\n\`\`\`\n`;
+        }
+        mdContent += `\n---\n\n`;
+      });
+    }
+
+    mdContent += `\n\n_Auto compiled by GrepLoop daemon - Local-First PR review agent._`;
+
+    const blob = new Blob([mdContent], { type: "text/markdown;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", `${activeRepo.name}-${activePr.sourceBranch.replace(/\//g, "-")}-review-card.md`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const handleCopyCode = (text: string, pathId: string) => {
+    navigator.clipboard.writeText(text);
+    setCopyFeedback(pathId);
+    setTimeout(() => setCopyFeedback(null), 2000);
+  };
+
+  return {
+    // db config
+    dbConfig,
+    setDbConfig,
+    dbStatus,
+    dbTestResult,
+    dbSaveResult,
+    isTestingDb,
+    isSavingDb,
+    handleTestDbConnection,
+    handleSaveDbConfig,
+    // repos + prs
+    repos,
+    selectedRepoId,
+    setSelectedRepoId,
+    prs,
+    selectedPrId,
+    setSelectedPrId,
+    prFiles,
+    selectedFilename,
+    setSelectedFilename,
+    findings,
+    logs,
+    fetchPrsForSelectedRepo,
+    // llm router
+    backendOption,
+    setBackendOption,
+    localPort,
+    setLocalPort,
+    localModel,
+    setLocalModel,
+    // scan
+    isScanning,
+    scanResult,
+    setScanResult,
+    handleTriggerPrScan,
+    handleExportMarkdown,
+    handleCopyCode,
+    copyFeedback,
+    // add repo modal
+    showAddRepoModal,
+    setShowAddRepoModal,
+    newRepoName,
+    setNewRepoName,
+    newRepoPath,
+    setNewRepoPath,
+    newBaseBranch,
+    setNewBaseBranch,
+    newBranchPattern,
+    setNewBranchPattern,
+    newTriggerMode,
+    setNewTriggerMode,
+    newQuietPeriod,
+    setNewQuietPeriod,
+    errorFeedback,
+    setErrorFeedback,
+    handleAddRepo,
+    // daemon callback
+    handleTriggerReviewPass,
+  };
+}
