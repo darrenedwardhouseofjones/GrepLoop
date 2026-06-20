@@ -40,20 +40,21 @@ GrepLoop is a single-framework Next.js 16 app talking to Supabase Postgres via P
 
 ---
 
-## Phase 0 — Clear the deck (1–2 days)
+## Phase 0 — Clear the deck (DONE, June 2026)
 
 **Goal:** Zero loose ends blocking MVP work. Codebase is in a state where a Phase 1 branch starts from a clean base.
 
 ### Work items
-- [ ] Extract `useDashboardData` hook from `App.tsx` to get it under 500 lines
-- [ ] Rebrand "Woodhill" → "GrepLoop" in `src/App.tsx` footer and `reviewService.ts` sample findings
-- [ ] Quick `README.md` rewrite — what GrepLoop is, how to run it, link to `prd.md` and `CLAUDE.md`
-- [ ] Delete the fake sample findings from `reviewService.ts` **stub** (they get replaced by real findings in Phase 1, but the stub shape stays until then)
+- [x] Extract `useDashboardData` hook from `App.tsx` to get it under 500 lines — dropped 774 → 330 lines (`58cb1d2`)
+- [x] Rebrand "Woodhill" → "GrepLoop" in `src/App.tsx` footer and `reviewService.ts` sample findings (`f529456`)
+- [x] Quick `README.md` rewrite — what GrepLoop is, how to run it, link to `prd.md` and `CLAUDE.md` (`b5b68ff`)
+- [ ] ~~Delete the fake sample findings from `reviewService.ts` stub~~ — deferred; the stub stays as a placeholder until Phase 1 Track 1B replaces it with the real engine
 
 ### Definition of Done
-- `App.tsx` < 500 lines
-- No "Woodhill" string anywhere in `src/`
-- `npm run lint && npm test && npm run build` clean on CI
+- [x] `App.tsx` < 500 lines (now 330)
+- [x] No "Woodhill" string anywhere in `src/`
+- [x] `npm run lint && npm test` clean
+- [ ] User actions still pending: rotate Supabase DB password (leaked in git history at `9ac1490`); delete `FIREBASE_SERVICE_ACCOUNT_GREPLOOP_956F8` GitHub repo secret
 
 ### Why this comes first
 A 774-line `App.tsx` makes every Phase 1 edit painful. The Woodhill strings will surface in screenshots during MVP testing. Both are 30-minute jobs — clear them now.
