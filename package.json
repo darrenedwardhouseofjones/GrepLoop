@@ -7,6 +7,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "clean": "rm -rf .next",
     "lint": "tsc --noEmit"
   },
@@ -33,9 +35,11 @@
     "@prisma/config": "^7.8.0",
     "@types/node": "^22.14.0",
     "@types/pg": "^8.20.0",
+    "@vitest/expect": "^4.1.9",
     "autoprefixer": "^10.4.21",
     "prisma": "^7.8.0",
     "tailwindcss": "^4.1.14",
-    "typescript": "~5.8.2"
+    "typescript": "~5.8.2",
+    "vitest": "^4.1.9"
   }
 }
