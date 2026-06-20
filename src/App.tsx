@@ -10,11 +10,13 @@ import {
   Database,
   Code2,
   ListTodo,
+  Cpu,
 } from "lucide-react";
 import PRDTracker from "./components/PRDTracker";
 import GitWatcher from "./components/GitWatcher";
 import CodebaseGraph from "./components/CodebaseGraph";
 import DbConfigView from "./components/views/DbConfigView";
+import LlmConfigView from "./components/views/LlmConfigView";
 import DashboardSidebar from "./components/DashboardSidebar";
 import PrsView from "./components/views/PrsView";
 import AddRepoModal from "./components/modals/AddRepoModal";
@@ -96,12 +98,7 @@ export default function App() {
             setActiveTab("prs");
             if (typeof window !== "undefined" && window.innerWidth < 768) setIsSidebarOpen(false);
           }}
-          backendOption={d.backendOption}
-          setBackendOption={d.setBackendOption}
-          localPort={d.localPort}
-          setLocalPort={d.setLocalPort}
-          localModel={d.localModel}
-          setLocalModel={d.setLocalModel}
+          onOpenLlmSettings={() => setActiveTab("llm_config")}
           logs={d.logs}
         />
 
@@ -131,6 +128,8 @@ export default function App() {
                     ? `GrepLoop Tracker: PRD Progress Roadmap`
                     : activeTab === "codebase"
                     ? `Codebase AST Indexer & Call-Graph Tracer`
+                    : activeTab === "llm_config"
+                    ? `LLM Router Configuration`
                     : `Multi-Database Data Source Settings`}
                 </span>
               </h2>
@@ -185,6 +184,16 @@ export default function App() {
                 <Database size={13} />
                 <span>Data Source Settings</span>
               </button>
+              <button
+                onClick={() => setActiveTab("llm_config")}
+                className={`px-2.5 py-1.5 rounded-md text-xs font-semibold font-mono tracking-tight transition-all flex items-center gap-1.5 ${
+                  activeTab === "llm_config" ? "bg-cyan-500 text-black" : "text-slate-400 hover:text-white"
+                }`}
+                id="tab-llm-config"
+              >
+                <Cpu size={13} />
+                <span>LLM Settings</span>
+              </button>
             </div>
           </div>
 
@@ -206,6 +215,8 @@ export default function App() {
                   onSave={d.handleSaveDbConfig}
                 />
               )}
+
+              {activeTab === "llm_config" && <LlmConfigView />}
 
               {activeTab === "codebase" && (
                 <motion.div

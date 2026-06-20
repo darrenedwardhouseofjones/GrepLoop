@@ -45,11 +45,6 @@ export function useDashboardData() {
   const [findings, setFindings] = useState<ReviewFinding[]>([]);
   const [logs, setLogs] = useState<ActivityLog[]>([]);
 
-  // ===== Pluggable LLM router config =====
-  const [backendOption, setBackendOption] = useState<"local" | "cloud">("cloud");
-  const [localPort, setLocalPort] = useState<number>(11434);
-  const [localModel, setLocalModel] = useState<string>("codellama:13b");
-
   // ===== Scan / UI feedback =====
   const [isScanning, setIsScanning] = useState(false);
   const [scanResult, setScanResult] = useState<{ count: number; model: string; notice?: string | null } | null>(null);
@@ -258,9 +253,6 @@ export function useDashboardData() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          backendOption,
-          localPort,
-          localModel,
           repoId: activeRepoName,
         }),
       });
@@ -414,13 +406,6 @@ export function useDashboardData() {
     findings,
     logs,
     fetchPrsForSelectedRepo,
-    // llm router
-    backendOption,
-    setBackendOption,
-    localPort,
-    setLocalPort,
-    localModel,
-    setLocalModel,
     // scan
     isScanning,
     scanResult,

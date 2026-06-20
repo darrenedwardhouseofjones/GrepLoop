@@ -1,7 +1,8 @@
 "use client";
 
-import { Activity, Folder, GitBranch, Plus } from "lucide-react";
-import type { ActivityLog, PullRequest, Repository } from "../lib/types";
+import { useEffect, useState } from "react";
+import { Activity, Folder, GitBranch, Plus, Sparkles } from "lucide-react";
+import type { ActivityLog, LlmConfig, PullRequest, Repository } from "../lib/types";
 import { getStatusBadgeStyle } from "../lib/types";
 
 interface Props {
@@ -13,12 +14,7 @@ interface Props {
   prs: PullRequest[];
   selectedPrId: string;
   onSelectPr: (prId: string) => void;
-  backendOption: "local" | "cloud";
-  setBackendOption: (v: "local" | "cloud") => void;
-  localPort: number;
-  setLocalPort: (n: number) => void;
-  localModel: string;
-  setLocalModel: (s: string) => void;
+  onOpenLlmSettings: () => void;
   logs: ActivityLog[];
 }
 
@@ -31,14 +27,33 @@ export default function DashboardSidebar({
   prs,
   selectedPrId,
   onSelectPr,
-  backendOption,
-  setBackendOption,
-  localPort,
-  setLocalPort,
-  localModel,
-  setLocalModel,
+  onOpenLlmSettings,
   logs,
 }: Props) {
+  const [llmConfig, setLlmConfig] = useState<LlmConfig | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const fetchLlmConfig = async () => {
+      try {
+        const res = await fetch("/api/llm/config");
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!cancelled) setLlmConfig(data);
+      } catch {
+        // silently leave pane empty — the LLM Settings tab is the source of truth
+      }
+    };
+    fetchLlmConfig();
+    // Re-poll every 10s so the sidebar reflects saves done in the settings tab
+    // without needing a manual refresh.
+    const poller = setInterval(fetchLlmConfig, 10000);
+    return () => {
+      cancelled = true;
+      clearInterval(poller);
+    };
+  }, []);
+
   return (
     <aside
       className={`
@@ -58,14 +73,7 @@ export default function DashboardSidebar({
         onAddProject={onAddProject}
       />
 
-      <LlmRouterPane
-        backendOption={backendOption}
-        setBackendOption={setBackendOption}
-        localPort={localPort}
-        setLocalPort={setLocalPort}
-        localModel={localModel}
-        setLocalModel={setLocalModel}
-      />
+      <LlmRouterPane config={llmConfig} onOpenSettings={onOpenLlmSettings} />
 
       <LogsPane logs={logs} />
     </aside>
@@ -256,71 +264,58 @@ function PrRow({ pr, isPrSelected, onSelect }: { pr: PullRequest; isPrSelected: 
 }
 
 function LlmRouterPane({
-  backendOption,
-  setBackendOption,
-  localPort,
-  setLocalPort,
-  localModel,
-  setLocalModel,
+  config,
+  onOpenSettings,
 }: {
-  backendOption: "local" | "cloud";
-  setBackendOption: (v: "local" | "cloud") => void;
-  localPort: number;
-  setLocalPort: (n: number) => void;
-  localModel: string;
-  setLocalModel: (s: string) => void;
+  config: LlmConfig | null;
+  onOpenSettings: () => void;
 }) {
+  const chatModel = config?.chatModel || "";
+  const shortModel = chatModel.split("/").pop() || chatModel;
+
   return (
     <div className="p-4 border-white/5 bg-slate-950/45 border-t">
-      <h2 className="text-[10px] uppercase tracking-[0.2em] text-slate-500 font-extrabold font-mono mb-3">
-        System LLM Router
-      </h2>
-      <div className="space-y-2 bg-slate-900/60 p-2.5 rounded-lg border border-white/5">
-        <div>
-          <label className="text-[9px] text-slate-500 uppercase font-mono font-bold block mb-1">Backend Target</label>
-          <select
-            value={backendOption}
-            onChange={(e) => setBackendOption(e.target.value as "local" | "cloud")}
-            className="w-full bg-slate-950 border border-white/10 rounded px-2 py-1 text-xs text-cyan-400 outline-hidden font-mono"
-          >
-            <option value="cloud">Cloud (Gemini API)</option>
-            <option value="local">Local (Ollama Port)</option>
-          </select>
-        </div>
-
-        {backendOption === "local" ? (
-          <div className="grid grid-cols-2 gap-2 mt-1">
-            <div>
-              <label className="text-[8px] text-slate-500 uppercase font-mono block mb-0.5">Ollama Port</label>
-              <input
-                type="number"
-                value={localPort}
-                onChange={(e) => setLocalPort(Number(e.target.value))}
-                className="w-full bg-slate-950 border border-white/10 rounded px-1.5 py-0.5 text-xs text-slate-300 font-mono text-center outline-hidden"
-              />
-            </div>
-            <div>
-              <label className="text-[8px] text-slate-500 uppercase font-mono block mb-0.5">Model</label>
-              <select
-                value={localModel}
-                onChange={(e) => setLocalModel(e.target.value)}
-                className="w-full bg-slate-950 border border-white/10 rounded px-1.5 py-0.5 text-[10px] text-slate-350 font-mono outline-hidden"
-              >
-                <option value="codellama:13b">codellama</option>
-                <option value="deepseek-coder">deepseek-coder</option>
-                <option value="qwen2.5-coder">qwen2.5</option>
-              </select>
-            </div>
+      <div className="flex items-center justify-between mb-3">
+        <h2 className="text-[10px] uppercase tracking-[0.2em] text-slate-500 font-extrabold font-mono">
+          LLM Router
+        </h2>
+        <button
+          onClick={onOpenSettings}
+          className="text-[9px] text-cyan-400 hover:text-cyan-300 font-mono uppercase tracking-wider flex items-center gap-1"
+          title="Open LLM Settings tab"
+        >
+          <Sparkles size={10} />
+          <span>Configure</span>
+        </button>
+      </div>
+      <div className="bg-slate-900/60 p-2.5 rounded-lg border border-white/5">
+        <div className="text-[8px] text-slate-500 uppercase font-mono block mb-0.5">Active Chat Model</div>
+        {chatModel ? (
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-[10px] text-cyan-400 font-mono font-bold truncate" title={chatModel}>
+              {shortModel}
+            </span>
+            {config?.hasApiKey ? (
+              <span className="text-[8px] text-emerald-400 bg-emerald-500/10 px-1 py-0.5 rounded border border-emerald-500/20 font-mono uppercase shrink-0">
+                Key Set
+              </span>
+            ) : (
+              <span className="text-[8px] text-amber-400 bg-amber-500/10 px-1 py-0.5 rounded border border-amber-500/20 font-mono uppercase shrink-0">
+                No Key
+              </span>
+            )}
           </div>
         ) : (
-          <div className="mt-1">
-            <div className="text-[9px] text-slate-500 font-mono uppercase block mb-0.5 flex items-center justify-between">
-              <span>Model:</span>
-              <span className="text-cyan-400 font-bold">gemini-3.5-flash</span>
-            </div>
-            <div className="text-[9px] text-slate-600 font-mono leading-tight">
-              * Utilizing secure, server-side sandboxed pipeline. Exceeds standard token limits.
-            </div>
+          <div className="text-[10px] text-slate-600 font-mono italic">
+            Not configured —{" "}
+            <button onClick={onOpenSettings} className="text-cyan-400 hover:underline not-italic">
+              set up
+            </button>
+          </div>
+        )}
+        {config?.endpoint && (
+          <div className="text-[8px] text-slate-600 font-mono truncate mt-1">
+            {config.endpoint.replace(/^https?:\/\//, "").split("/")[0]}
           </div>
         )}
       </div>

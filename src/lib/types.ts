@@ -72,7 +72,15 @@ export interface DbConfig {
   sqliteFile: string;
 }
 
-export type ActiveTab = "prs" | "watcher" | "roadmap" | "db_config" | "codebase";
+export interface LlmConfig {
+  endpoint: string;
+  hasApiKey: boolean;
+  chatModel: string;
+  embeddingModel: string;
+  configured: boolean;
+}
+
+export type ActiveTab = "prs" | "watcher" | "roadmap" | "db_config" | "llm_config" | "codebase";
 
 export const getStatusBadgeStyle = (status: string): string => {
   switch (status) {
