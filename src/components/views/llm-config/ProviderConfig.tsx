@@ -48,7 +48,7 @@ export default function ProviderConfig({
           trailing={
             preset.hasApiKey ? (
               <span className="text-[9px] text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/20 normal-case">
-                Stored — leave blank to keep
+                ✓ Stored securely (hidden — type to replace)
               </span>
             ) : null
           }
@@ -58,9 +58,17 @@ export default function ProviderConfig({
               type={preset.showApiKey ? "text" : "password"}
               value={preset.apiKey}
               onChange={(e) => onUpdate({ apiKey: e.target.value })}
-              placeholder={preset.hasApiKey ? "••••••••••••••••" : "Paste key (blank for local endpoints)"}
+              placeholder={
+                preset.hasApiKey
+                  ? "Key is stored — type a new one here to replace it"
+                  : "Paste key (blank for local endpoints)"
+              }
               autoComplete="off"
-              className="w-full bg-slate-900 border border-white/10 rounded-lg px-3 py-2 pr-10 text-xs text-slate-100 font-mono focus:border-cyan-500 outline-none"
+              className={`w-full bg-slate-900 border rounded-lg px-3 py-2 pr-10 text-xs text-slate-100 font-mono outline-none ${
+                preset.hasApiKey && !preset.apiKey
+                  ? "border-emerald-500/30 focus:border-cyan-500"
+                  : "border-white/10 focus:border-cyan-500"
+              }`}
             />
             <button
               type="button"
