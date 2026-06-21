@@ -284,3 +284,67 @@ export async function pathExists(p: string): Promise<boolean> {
 }
 
 export const PRESETS_FILE_PATH = PRESETS_PATH;
+
+export interface RemoteModel {
+  id: string;
+  name?: string;
+}
+
+export interface RemoteModelsResult {
+  ok: boolean;
+  count?: number;
+  models?: RemoteModel[];
+  error?: string;
+}
+
+/**
+ * Fetches the model catalog from an OpenAI-compatible /v1/models endpoint.
+ * Doubles as the connection test — a 200 response means the endpoint is
+ * reachable and the key is valid. AbortController caps the wait at 8s.
+ */
+export async function fetchRemoteModels(
+  endpoint: string,
+  apiKey: string,
+): Promise<RemoteModelsResult> {
+  if (!endpoint) return { ok: false, error: "Endpoint URL is required." };
+  if (!apiKey) return { ok: false, error: "API key is required for this endpoint." };
+
+  try {
+    const url = `${endpoint.replace(/\/$/, "")}/models`;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 8000);
+    const res = await fetch(url, {
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      signal: controller.signal,
+    });
+    clearTimeout(timeout);
+
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      return {
+        ok: false,
+        error: `Endpoint returned ${res.status}: ${text.slice(0, 200)}`,
+      };
+    }
+
+    const data = await res.json();
+    const raw: any[] = data.data || data.models || [];
+    const models: RemoteModel[] = raw
+      .map((m: any) => ({
+        id: typeof m.id === "string" ? m.id : typeof m.name === "string" ? m.name : "",
+        name: typeof m.name === "string" ? m.name : undefined,
+      }))
+      .filter((m) => m.id.length > 0)
+      .sort((a, b) => a.id.localeCompare(b.id));
+
+    return { ok: true, count: models.length, models };
+  } catch (e: any) {
+    const msg = e?.name === "AbortError"
+      ? "Timed out after 8s waiting for endpoint response."
+      : e?.message || String(e);
+    return { ok: false, error: msg };
+  }
+}

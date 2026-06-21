@@ -1,10 +1,14 @@
 import { NextResponse } from "next/server";
-import { fetchRemoteModels } from "@/src/lib/llmConfig";
+import { fetchRemoteModels, readPresets } from "@/src/lib/llmPresets";
 
 /**
  * Proxies the model catalog from an OpenAI-compatible /v1/models endpoint.
  * Doubles as a connection test — a 200 means the endpoint is reachable and
- * the key is valid. The browser never sees the API key directly.
+ * the key is valid. The browser never sees the stored API key directly.
+ *
+ * If the body's apiKey is empty, the server looks up the stored key for
+ * a preset with a matching endpoint (lets the user re-fetch the catalog
+ * without re-entering the key in the masked UI).
  */
 export async function POST(req: Request) {
   try {
@@ -12,9 +16,11 @@ export async function POST(req: Request) {
     const endpoint = typeof body.endpoint === "string" ? body.endpoint.trim() : "";
     const apiKey = typeof body.apiKey === "string" ? body.apiKey.trim() : "";
 
-    // If the user left the key blank but one is already in env, use that
-    // — lets them re-fetch the catalog without re-entering the key.
-    const effectiveKey = apiKey || process.env.LLM_API_KEY || "";
+    let effectiveKey = apiKey;
+    if (!effectiveKey && endpoint) {
+      const match = readPresets().presets.find((p) => p.endpoint === endpoint);
+      if (match) effectiveKey = match.apiKey;
+    }
 
     const result = await fetchRemoteModels(endpoint, effectiveKey);
     if (!result.ok) {
