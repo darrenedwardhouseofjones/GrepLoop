@@ -83,13 +83,16 @@ export default function CodebaseGraph({ repoId, repoName, onIndexComplete }: Cod
       const res = await fetch(`/api/repos/${repoId}/index`, {
         method: "POST"
       });
+      const data = await res.json().catch(() => ({}));
       if (res.ok) {
-        const data = await res.json();
         setIndexStats(data.stats);
         await fetchData();
         onIndexComplete?.();
       } else {
-        alert("AST Indexing compilation failed.");
+        alert(
+          `Indexing failed (${res.status}): ${data.error || res.statusText}\n` +
+          `Check the dev server console for details.`,
+        );
       }
     } catch (err: any) {
       alert("Error parsing AST structure: " + err.message);

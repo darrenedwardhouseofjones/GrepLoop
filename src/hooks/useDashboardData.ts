@@ -92,8 +92,13 @@ export function useDashboardData() {
       const data = await res.json();
       if (Array.isArray(data)) {
         setRepos(data);
-        if (data.length > 0 && !selectedRepoId) {
-          setSelectedRepoId(data[0].id);
+        // Reset selection if it points at a repo that no longer exists
+        // (covers the "greploop-core" bootstrap default and deleted repos).
+        if (data.length > 0) {
+          const stillExists = data.some((r: Repository) => r.id === selectedRepoId);
+          if (!selectedRepoId || !stillExists) {
+            setSelectedRepoId(data[0].id);
+          }
         }
       }
     } catch (e) {
