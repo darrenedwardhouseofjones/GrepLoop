@@ -390,9 +390,21 @@ export class IndexingService {
 
     let symbolsCount = 0;
     const rawCallAccumulator: { fromSymbolName: string; toRaw: string; line: number; filePath: string }[] = [];
-    
+
     // Key mapped: filePath -> SymbolId
+    // NOTE: must use Object.hasOwn() when probing — keys like "toString",
+    // "hasOwnProperty", "valueOf" collide with Object.prototype methods and
+    // a naive `map[name]` truthiness check returns the inherited Function,
+    // which then crashes createMany with [object Function] as toId.
     const symbolNameIdMap: Record<string, string> = {};
+    const hasOwn = (k: string) => Object.prototype.hasOwnProperty.call(symbolNameIdMap, k);
+    const lookup = (k: string): string | undefined => (hasOwn(k) ? symbolNameIdMap[k] : undefined);
+
+    // In-memory accumulators for bulk inserts. Per-row round-trips against
+    // the Supabase pooler take ~2s each — 500+ files × 2-3 rows per file
+    // is 30+ minutes sequentially. Batching drops that to a handful of calls.
+    const fileRows: { repoId: string; filePath: string; fileHash: string; parsedAt: bigint }[] = [];
+    const symbolRows: { id: string; repoId: string; filePath: string; name: string; kind: string; language: string; lineStart: number; lineEnd: number; signature: string | null; sourceHash: string }[] = [];
 
     for (const absoluteFilePath of filesToParse) {
       try {
@@ -400,63 +412,41 @@ export class IndexingService {
         const code = fs.readFileSync(absoluteFilePath, "utf-8");
         const hash = crypto.createHash("md5").update(code).digest("hex");
 
-        // Insert index manifest file row (upsert = idempotent over (repoId,filePath)
-        // so a partial run from a crashed/timed-out previous attempt can't poison
-        // re-indexing with P2002 unique-violations)
-        await prisma.file.upsert({
-          where: { repoId_filePath: { repoId, filePath: relativePath } },
-          create: {
-            repoId: repoId,
-            filePath: relativePath,
-            fileHash: hash,
-            parsedAt: BigInt(Date.now())
-          },
-          update: {
-            fileHash: hash,
-            parsedAt: BigInt(Date.now())
-          }
+        fileRows.push({
+          repoId,
+          filePath: relativePath,
+          fileHash: hash,
+          parsedAt: BigInt(Date.now()),
         });
 
         // Parse content
         const { symbols, rawCalls } = this.parseFileSymbols(repoId, relativePath, code);
 
-        // Put symbols into database
+        // Collect symbol rows + lookup map
         for (const meta of symbols) {
           const symId = `sym-${repoId}-${crypto.createHash("md5").update(relativePath + meta.name).digest("hex").slice(0, 10)}`;
-          
-          await prisma.symbol.upsert({
-            where: { id: symId },
-            create: {
-              id: symId,
-              repoId: repoId,
-              filePath: relativePath,
-              name: meta.name,
-              kind: meta.kind,
-              language: meta.language,
-              lineStart: meta.lineStart,
-              lineEnd: meta.lineEnd,
-              signature: meta.signature || null,
-              sourceHash: meta.sourceHash
-            },
-            update: {
-              name: meta.name,
-              kind: meta.kind,
-              language: meta.language,
-              lineStart: meta.lineStart,
-              lineEnd: meta.lineEnd,
-              signature: meta.signature || null,
-              sourceHash: meta.sourceHash
-            }
+
+          symbolRows.push({
+            id: symId,
+            repoId,
+            filePath: relativePath,
+            name: meta.name,
+            kind: meta.kind,
+            language: meta.language,
+            lineStart: meta.lineStart,
+            lineEnd: meta.lineEnd,
+            signature: meta.signature || null,
+            sourceHash: meta.sourceHash,
           });
 
           symbolsCount++;
-          
-          // Map index by file+name and also globally by name for lookup
+          // Use a plain object without prototype-pollution risk on common
+          // method names like "toString" — store under both keys but only
+          // ever read via the lookup() helper.
           symbolNameIdMap[`${relativePath}|${meta.name}`] = symId;
           symbolNameIdMap[meta.name] = symId;
         }
 
-        // Add raw class scope method namespaces
         for (const call of rawCalls) {
           rawCallAccumulator.push({
             ...call,
@@ -469,44 +459,55 @@ export class IndexingService {
       }
     }
 
-    // Now resolve Call Graph edges
-    let edgesResolved = 0;
+    // Bulk insert files + symbols. Chunked to avoid Supabase statement-size
+    // limits and to keep individual queries under the pooler's patience.
+    const CHUNK = 100;
+    for (let i = 0; i < fileRows.length; i += CHUNK) {
+      await prisma.file.createMany({ data: fileRows.slice(i, i + CHUNK), skipDuplicates: true });
+    }
+    for (let i = 0; i < symbolRows.length; i += CHUNK) {
+      await prisma.symbol.createMany({ data: symbolRows.slice(i, i + CHUNK), skipDuplicates: true });
+    }
+
+    // Now resolve Call Graph edges in memory, then bulk insert
+    const edgeRows: { id: string; repoId: string; fromId: string; toId: string | null; toRaw: string; kind: string; filePath: string; line: number }[] = [];
     let edgeIndex = 1;
 
     for (const call of rawCallAccumulator) {
-      const fromSymbolId = symbolNameIdMap[`${call.filePath}|${call.fromSymbolName}`] || symbolNameIdMap[call.fromSymbolName];
+      const fromSymbolId = lookup(`${call.filePath}|${call.fromSymbolName}`) || lookup(call.fromSymbolName);
       if (!fromSymbolId) continue;
 
       // Find toSymbolId (linked function)
       // 1. Check local file namespace matches
-      let toSymbolId = symbolNameIdMap[`${call.filePath}|${call.toRaw}`];
+      let toSymbolId = lookup(`${call.filePath}|${call.toRaw}`);
       if (!toSymbolId) {
         // 2. Scan class namespaces (e.g. Call is 'charge' and class method is 'Billing.charge')
-        const matches = Object.keys(symbolNameIdMap).filter(k => k.endsWith(`.${call.toRaw}`) || k.endsWith(`::${call.toRaw}`));
+        const matches = Object.keys(symbolNameIdMap).filter(k => Object.prototype.hasOwnProperty.call(symbolNameIdMap, k) && (k.endsWith(`.${call.toRaw}`) || k.endsWith(`::${call.toRaw}`)));
         if (matches.length > 0) {
           toSymbolId = symbolNameIdMap[matches[0]];
         }
       }
       if (!toSymbolId) {
         // 3. Global search
-        toSymbolId = symbolNameIdMap[call.toRaw];
+        toSymbolId = lookup(call.toRaw);
       }
 
-      await prisma.edge.create({
-        data: {
-          id: `edge-${repoId}-${edgeIndex++}`,
-          repoId: repoId,
-          fromId: fromSymbolId,
-          toId: toSymbolId || null,
-          toRaw: call.toRaw,
-          kind: "call",
-          filePath: call.filePath,
-          line: call.line
-        }
+      edgeRows.push({
+        id: `edge-${repoId}-${edgeIndex++}`,
+        repoId,
+        fromId: fromSymbolId,
+        toId: toSymbolId || null,
+        toRaw: call.toRaw,
+        kind: "call",
+        filePath: call.filePath,
+        line: call.line,
       });
-
-      edgesResolved++;
     }
+
+    for (let i = 0; i < edgeRows.length; i += CHUNK) {
+      await prisma.edge.createMany({ data: edgeRows.slice(i, i + CHUNK), skipDuplicates: true });
+    }
+    const edgesResolved = edgeRows.length;
 
     // Trigger Phase B background summary & embedding generation
     this.startBackgroundEnrichment(repoId, resolvedPath);
