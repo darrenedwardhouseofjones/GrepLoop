@@ -301,13 +301,22 @@ export interface RemoteModelsResult {
  * Fetches the model catalog from an OpenAI-compatible /v1/models endpoint.
  * Doubles as the connection test — a 200 response means the endpoint is
  * reachable and the key is valid. AbortController caps the wait at 8s.
+ *
+ * Local endpoints (localhost / 127.0.0.1 / 0.0.0.0) skip the apiKey
+ * requirement so Ollama and other self-hosted servers work with a blank
+ * key. A dummy Bearer is still sent because some OpenAI-compatible
+ * proxies 401 on a missing Authorization header.
  */
 export async function fetchRemoteModels(
   endpoint: string,
   apiKey: string,
 ): Promise<RemoteModelsResult> {
   if (!endpoint) return { ok: false, error: "Endpoint URL is required." };
-  if (!apiKey) return { ok: false, error: "API key is required for this endpoint." };
+
+  const isLocal = /\b(localhost|127\.0\.0\.1|0\.0\.0\.0)\b/.test(endpoint);
+  if (!apiKey && !isLocal) {
+    return { ok: false, error: "API key is required for this endpoint." };
+  }
 
   try {
     const url = `${endpoint.replace(/\/$/, "")}/models`;
@@ -315,7 +324,7 @@ export async function fetchRemoteModels(
     const timeout = setTimeout(() => controller.abort(), 8000);
     const res = await fetch(url, {
       headers: {
-        Authorization: `Bearer ${apiKey}`,
+        Authorization: `Bearer ${apiKey || "no-key-required"}`,
         "Content-Type": "application/json",
       },
       signal: controller.signal,
