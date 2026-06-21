@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import type React from "react";
 import {
   type ActivityLog,
@@ -15,10 +15,14 @@ import {
  * CRUD actions. App.tsx consumes this and only owns UI state
  * (sidebar open/closed, active tab).
  *
- * The 2-second polling cadence on selectedRepoId / selectedPrId is
- * pre-existing behavior — kept verbatim during extraction.
+ * Poll cadence: 15s. The /api/repos/:id/prs endpoint can take 60s+
+ * against the Supabase pooler; polling faster than that just stacks
+ * up fetches past Chrome's 6-concurrent-per-origin cap, which surfaces
+ * as "Failed to fetch" in the console. The in-flight ref below also
+ * skips a tick if the previous poll hasn't returned yet.
  */
 export function useDashboardData() {
+  const pollInFlight = useRef(false);
   // ===== Database configuration =====
   const [dbConfig, setDbConfig] = useState<DbConfig>({
     dialect: "postgresql",
@@ -180,12 +184,20 @@ export function useDashboardData() {
       if (selectedPrId) fetchPrDetails(selectedPrId);
     }, 50);
 
-    const poller = setInterval(() => {
-      fetchRepos();
-      fetchLogs();
-      if (selectedRepoId) fetchPrsForSelectedRepo(selectedRepoId, true);
-      if (selectedPrId) fetchPrDetails(selectedPrId);
-    }, 2000);
+    const poller = setInterval(async () => {
+      if (pollInFlight.current) return;
+      pollInFlight.current = true;
+      try {
+        await Promise.all([
+          fetchRepos(),
+          fetchLogs(),
+          selectedRepoId ? fetchPrsForSelectedRepo(selectedRepoId, true) : Promise.resolve(),
+          selectedPrId ? fetchPrDetails(selectedPrId) : Promise.resolve(),
+        ]);
+      } finally {
+        pollInFlight.current = false;
+      }
+    }, 15000);
 
     return () => {
       clearTimeout(initial);
