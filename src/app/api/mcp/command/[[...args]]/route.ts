@@ -66,7 +66,7 @@ async function handlePrCheck(args: any): Promise<string> {
   let pr = args.number ? await findPrByIdOrNumber(args.number) : null;
   if (pr && args.repoId && pr.repoId !== args.repoId) pr = null;
   if (!pr && args.repoId && args.branch) pr = await findPrByBranch(args.repoId, args.branch);
-  if (!pr) return `No PRs found matching that criteria on this repository.`;
+  if (!pr) return `> **No pull requests found** matching that criteria on this repository.\n>\n> To review a PR, create a feature branch and push it, or check available PRs with \`prlist\`.`;
 
   const sr = await runPrScan(pr.id);
   const pass = sr.rating >= 4;
@@ -85,7 +85,7 @@ async function handlePrComments(args: any): Promise<string> {
   let pr = args.number ? await findPrByIdOrNumber(args.number) : null;
   if (pr && args.repoId && pr.repoId !== args.repoId) pr = null;
   if (!pr && args.repoId && args.branch) pr = await findPrByBranch(args.repoId, args.branch);
-  if (!pr) return `No PRs found matching that criteria on this repository.`;
+  if (!pr) return `> **No pull requests found** matching that criteria on this repository.\n>\n> To review a PR, create a feature branch and push it, or check available PRs with \`prlist\`.`;
   const findings = await prisma.reviewFinding.findMany({ where: { prId: pr.id } });
   if (findings.length === 0) return "No findings for this PR.";
   let out = `## Findings for PR #${pr.id}\n\n`;
@@ -100,7 +100,7 @@ async function handlePrList(args: any): Promise<string> {
   const prs = await prisma.pullRequest.findMany({
     where: { repoId: args.repoId }, orderBy: { createdAt: "desc" }, take: 20,
   });
-  if (prs.length === 0) return "No PRs found for this repo.";
+  if (prs.length === 0) return "> **No pull requests found** for this repo.";
   let out = `## Pull Requests\n\n`;
   for (const p of prs) {
     out += `- **${p.sourceBranch}** — ${p.title} — ${p.rating != null ? `${p.rating}/5` : "Not scanned"}\n`;
@@ -187,7 +187,7 @@ async function handleLegacyCommand(body: any, defRepo: string | null) {
   try {
     if (cmdName.endsWith("prcheck") || cmdName.endsWith("checkpr")) {
       const pr = await resolvePr({ ...body, repoId: body.repoId || defRepo }, argVal);
-      if (!pr) return NextResponse.json({ status: "Error", message: "PR not found." });
+      if (!pr) return NextResponse.json({ status: "Error", message: "> No PR found on this repository." });
       const sr = await runPrScan(pr.id);
       return NextResponse.json({
         status: "Success", type: "check", rating: `${sr.rating}/5`,
@@ -198,7 +198,7 @@ async function handleLegacyCommand(body: any, defRepo: string | null) {
     }
     if (cmdName.endsWith("prcomments") || cmdName.endsWith("comments")) {
       const pr = await resolvePr({ ...body, repoId: body.repoId || defRepo }, argVal);
-      if (!pr) return NextResponse.json({ status: "Error", message: "PR not found." });
+      if (!pr) return NextResponse.json({ status: "Error", message: "> No PR found on this repository." });
       const findings = await prisma.reviewFinding.findMany({ where: { prId: pr.id } });
       return NextResponse.json({
         status: "Success", type: "comments",
