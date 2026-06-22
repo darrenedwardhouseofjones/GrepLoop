@@ -63,12 +63,10 @@ function toolsWithRepo(repo: string | null): any[] {
 }
 
 async function handlePrCheck(args: any): Promise<string> {
-  const pr = args.number
-    ? await findPrByIdOrNumber(args.number)
-    : args.repoId && args.branch
-      ? await findPrByBranch(args.repoId, args.branch)
-      : null;
-  if (!pr) return `PR not found. Provide "number" or "repoId"+"branch".`;
+  let pr = args.number ? await findPrByIdOrNumber(args.number) : null;
+  if (pr && args.repoId && pr.repoId !== args.repoId) pr = null;
+  if (!pr && args.repoId && args.branch) pr = await findPrByBranch(args.repoId, args.branch);
+  if (!pr) return `No PRs found matching that criteria on this repository.`;
 
   const sr = await runPrScan(pr.id);
   const pass = sr.rating >= 4;
@@ -84,12 +82,10 @@ async function handlePrCheck(args: any): Promise<string> {
 }
 
 async function handlePrComments(args: any): Promise<string> {
-  const pr = args.number
-    ? await findPrByIdOrNumber(args.number)
-    : args.repoId && args.branch
-      ? await findPrByBranch(args.repoId, args.branch)
-      : null;
-  if (!pr) return `PR not found. Provide "number" or "repoId"+"branch".`;
+  let pr = args.number ? await findPrByIdOrNumber(args.number) : null;
+  if (pr && args.repoId && pr.repoId !== args.repoId) pr = null;
+  if (!pr && args.repoId && args.branch) pr = await findPrByBranch(args.repoId, args.branch);
+  if (!pr) return `No PRs found matching that criteria on this repository.`;
   const findings = await prisma.reviewFinding.findMany({ where: { prId: pr.id } });
   if (findings.length === 0) return "No findings for this PR.";
   let out = `## Findings for PR #${pr.id}\n\n`;
@@ -172,9 +168,11 @@ async function handleJsonRpc(body: any, defRepo: string | null) {
 }
 
 async function resolvePr(body: any, argVal: string): Promise<any | null> {
-  if (argVal) return findPrByIdOrNumber(argVal);
-  if (body.repoId && body.branch) return findPrByBranch(body.repoId, body.branch);
-  return null;
+  let pr: any = null;
+  if (argVal) pr = await findPrByIdOrNumber(argVal);
+  if (pr && body.repoId && pr.repoId !== body.repoId) pr = null;
+  if (!pr && body.repoId && body.branch) pr = await findPrByBranch(body.repoId, body.branch);
+  return pr;
 }
 
 async function handleLegacyCommand(body: any, defRepo: string | null) {
