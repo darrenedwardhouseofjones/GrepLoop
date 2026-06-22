@@ -4,17 +4,12 @@ import { findPrByIdOrNumber, findPrByBranch } from "@/src/lib/findPr";
 import { runPrScan } from "@/reviewService";
 import { authenticateMcpRequest } from "@/src/lib/mcpAuth";
 
-type ResolveFn = (body: any, cmdArg: string) => Promise<any | null>;
 async function resolvePr(body: any, cmdArg: string): Promise<any | null> {
   if (cmdArg) return findPrByIdOrNumber(cmdArg);
   if (body.repoId && body.branch) return findPrByBranch(body.repoId, body.branch);
   return null;
 }
 
-// ── MCP Streamable HTTP session store ──
-const sessions = new Map<string, string[]>();
-
-// ── Tool definitions ──
 const TOOLS = [
   {
     name: "prcheck",
@@ -53,7 +48,6 @@ const TOOLS = [
   },
 ];
 
-// ── Tool handlers ──
 async function handlePrCheck(args: any): Promise<string> {
   const pr = args.number
     ? await findPrByIdOrNumber(args.number)
@@ -64,7 +58,7 @@ async function handlePrCheck(args: any): Promise<string> {
 
   const sr = await runPrScan(pr.id);
   const pass = sr.rating >= 4;
-  let out = `## PR #${pr.id} — "${pr.title}"\n**Rating: ${sr.rating}/5** — ${pass ? "✅ PASS" : "❌ FAIL"}\n\n`;
+  let out = `## PR #${pr.id} — "${pr.title}"\n**Rating: ${sr.rating}/5** — ${pass ? "PASS" : "FAIL"}\n\n`;
   if (sr.findings.length === 0) {
     out += "No findings.\n";
   } else {
@@ -113,74 +107,32 @@ const toolHandlers: Record<string, (args: any) => Promise<string>> = {
   prlist: handlePrList,
 };
 
-// ── GET: SSE stream for MCP streamable HTTP ──
-export async function GET(req: Request) {
-  const url = new URL(req.url);
-  const sessionId = url.searchParams.get("sessionId") || crypto.randomUUID();
-  const messageUrl = `/api/mcp/command?sessionId=${sessionId}`;
-
-  sessions.set(sessionId, []);
-
-  const stream = new ReadableStream({
-    start(controller) {
-      const sse = (event: string, data: string) => {
-        controller.enqueue(new TextEncoder().encode(`event: ${event}\ndata: ${data}\n\n`));
-      };
-
-      // MCP streamable HTTP: send endpoint event with sessionId
-      sse("endpoint", JSON.stringify({ endpoint: messageUrl, sessionId }));
-
-      const poll = setInterval(() => {
-        const q = sessions.get(sessionId);
-        if (q && q.length > 0) {
-          const batch = q.splice(0);
-          for (const msg of batch) sse("message", msg);
-        }
-      }, 200);
-
-      const keepalive = setInterval(() => {
-        controller.enqueue(new TextEncoder().encode(": keepalive\n\n"));
-      }, 15000);
-
-      req.signal.addEventListener("abort", () => {
-        clearInterval(poll);
-        clearInterval(keepalive);
-        sessions.delete(sessionId);
-      });
-    },
-  });
-
-  return new Response(stream, {
-    headers: {
-      "Content-Type": "text/event-stream",
-      "Cache-Control": "no-cache",
-      Connection: "keep-alive",
-    },
-  });
+// ── GET: health check (required by some MCP clients) ──
+export function GET() {
+  return NextResponse.json({ ok: true, message: "bughunter MCP server — use POST for JSON-RPC" });
 }
 
-// ── POST: JSON-RPC (when sessionId present) or legacy command format ──
+// ── POST: JSON-RPC (Streamable HTTP) or legacy command format ──
 export async function POST(req: Request) {
-  const url = new URL(req.url);
-  const sessionId = url.searchParams.get("sessionId");
-
-  if (sessionId) {
-    return handleJsonRpc(req, sessionId);
-  }
-
-  return handleLegacyCommand(req);
-}
-
-async function handleJsonRpc(req: Request, sessionId: string) {
   const auth = await authenticateMcpRequest(req);
   if (!auth.ok) {
     return NextResponse.json({ jsonrpc: "2.0", id: null, error: { code: -32001, message: auth.error } }, { status: 401 });
   }
 
-  const body = await req.json().catch(() => ({}));
+  const clone = req.clone();
+  const body = await clone.json().catch(() => null);
+
+  // JSON-RPC auto-detect
+  if (body && body.jsonrpc && body.method) {
+    return handleJsonRpc(body);
+  }
+
+  return handleLegacyCommand(body);
+}
+
+async function handleJsonRpc(body: any) {
   const { method, id, params } = body;
 
-  // JSON-RPC notification (no id) — never respond
   if (id === undefined || id === null) {
     return new Response(null, { status: 202 });
   }
@@ -208,8 +160,7 @@ async function handleJsonRpc(req: Request, sessionId: string) {
     const args = params?.arguments ?? {};
     if (!toolName || !toolHandlers[toolName]) {
       return NextResponse.json({
-        jsonrpc: "2.0", id,
-        error: { code: -32601, message: `Unknown tool: ${toolName}` },
+        jsonrpc: "2.0", id, error: { code: -32601, message: `Unknown tool: ${toolName}` },
       });
     }
     const result = await toolHandlers[toolName](args);
@@ -220,20 +171,13 @@ async function handleJsonRpc(req: Request, sessionId: string) {
   }
 
   return NextResponse.json({
-    jsonrpc: "2.0", id,
-    error: { code: -32601, message: `Unknown method: ${method}` },
+    jsonrpc: "2.0", id, error: { code: -32601, message: `Unknown method: ${method}` },
   });
 }
 
-// ── Legacy command format (no sessionId) ──
-async function handleLegacyCommand(req: Request) {
-  const auth = await authenticateMcpRequest(req);
-  if (!auth.ok) {
-    return NextResponse.json({ status: "Error", message: auth.error }, { status: 401 });
-  }
-
-  const body = await req.json().catch(() => ({} as any));
-  const { command } = body;
+// ── Legacy command format ──
+async function handleLegacyCommand(body: any) {
+  const { command } = body || {};
   if (!command || typeof command !== "string") {
     return NextResponse.json({
       status: "Error",
