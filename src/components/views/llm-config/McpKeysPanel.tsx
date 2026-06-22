@@ -160,10 +160,16 @@ export default function McpKeysPanel() {
     setError(null);
     setNewKeyValue(null);
     try {
+      const existing = await (await fetch("/api/mcp/keys")).json();
+      await Promise.all(
+        (existing as { id: string }[]).map((k) =>
+          fetch(`/api/mcp/keys/${k.id}`, { method: "DELETE" })
+        )
+      );
       const res = await fetch("/api/mcp/keys", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: newKeyName }),
+        body: JSON.stringify({ name: newKeyName || "BugHunter API Key" }),
       });
       const data = await res.json();
       if (res.ok) {
@@ -230,11 +236,7 @@ export default function McpKeysPanel() {
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
                       <span className="text-xs font-mono font-bold text-slate-300">{k.name}</span>
-                      {k.revoked ? (
-                        <span className="text-[9px] text-rose-400 bg-rose-500/10 px-1.5 py-0.5 rounded border border-rose-500/20 font-mono uppercase">Revoked</span>
-                      ) : (
-                        <span className="text-[9px] text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/20 font-mono uppercase">Active</span>
-                      )}
+                      <span className="text-[9px] text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/20 font-mono uppercase">Active</span>
                     </div>
                     <div className="text-[10px] text-slate-500 font-mono mt-0.5">{k.prefix}</div>
                     <div className="text-[9px] text-slate-600 font-mono">
@@ -242,15 +244,13 @@ export default function McpKeysPanel() {
                       {k.lastUsedAt ? ` · Last used ${new Date(k.lastUsedAt).toLocaleDateString()}` : " · Never used"}
                     </div>
                   </div>
-                  {!k.revoked && (
-                    <button
-                      onClick={() => handleRevoke(k.id)}
-                      className="p-2 hover:bg-rose-500/10 rounded-lg text-slate-500 hover:text-rose-400 transition-colors"
-                      title="Revoke key"
-                    >
-                      <Trash2 size={13} />
-                    </button>
-                  )}
+                  <button
+                    onClick={() => handleRevoke(k.id)}
+                    className="p-2 hover:bg-rose-500/10 rounded-lg text-slate-500 hover:text-rose-400 transition-colors"
+                    title="Delete key"
+                  >
+                    <Trash2 size={13} />
+                  </button>
                 </div>
               ))}
             </div>
@@ -323,10 +323,16 @@ export default function McpKeysPanel() {
                   if (hasKey) { setActiveTool(t.id); return; }
                   setCreating(true);
                   try {
+                    const existing = await (await fetch("/api/mcp/keys")).json();
+                    await Promise.all(
+                      (existing as { id: string }[]).map((k) =>
+                        fetch(`/api/mcp/keys/${k.id}`, { method: "DELETE" })
+                      )
+                    );
                     const res = await fetch("/api/mcp/keys", {
                       method: "POST",
                       headers: { "Content-Type": "application/json" },
-                      body: JSON.stringify({ name: `BugHunter (${t.label})` }),
+                      body: JSON.stringify({ name: "BugHunter API Key" }),
                     });
                     const data = await res.json();
                     if (res.ok) setNewKeyValue(data.key);

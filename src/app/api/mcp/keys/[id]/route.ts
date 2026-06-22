@@ -9,10 +9,7 @@ export async function DELETE(_req: Request, { params }: { params: Promise<{ id: 
     return NextResponse.json({ error: "API key not found." }, { status: 404 });
   }
 
-  await prisma.mcpApiKey.update({
-    where: { id },
-    data: { revoked: true },
-  });
+  await prisma.mcpApiKey.delete({ where: { id } });
 
   return NextResponse.json({ success: true });
 }
