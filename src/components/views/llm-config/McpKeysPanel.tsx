@@ -29,43 +29,61 @@ const tools: ToolConfig[] = [
 ];
 
 function InstallModal({ tool, origin, apiKey, onClose }: { tool: ToolId; origin: string; apiKey: string | null; onClose: () => void }) {
-  const [copied, setCopied] = useState(false);
+  const [copiedSection, setCopiedSection] = useState<string | null>(null);
 
-  const copy = (text: string) => {
+  const copy = (text: string, section: string) => {
     navigator.clipboard.writeText(text);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    setCopiedSection(section);
+    setTimeout(() => setCopiedSection(null), 2000);
   };
 
   const key = apiKey || "gl_mcp_YOUR_KEY_HERE";
 
-  const commands: Record<ToolId, { title: string; command: string; desc: string }> = {
+  interface CmdSection { label: string; command: string; }
+  const sections: Record<ToolId, { title: string; steps: CmdSection[] }> = {
     claude: {
       title: "Claude Code",
-      desc: "Installs the BugHunter skill + MCP server. Then use /bughunter from any project.",
-      command: [
-        `claude mcp add --transport http bughunter ${origin}/api/mcp/command --header "Authorization: Bearer ${key}"`,
-        `cp -r skills/bughunter ~/.claude/skills/`,
-      ].join(" && "),
+      steps: [
+        {
+          label: "Install MCP server",
+          command: `claude mcp add --transport http bughunter ${origin}/api/mcp/command --header "Authorization: Bearer ${key}"`,
+        },
+        {
+          label: "Install BugHunter skill (run from project root)",
+          command: `cp -r skills/bughunter ~/.claude/skills/`,
+        },
+      ],
     },
     cursor: {
       title: "Cursor",
-      desc: "Registers BugHunter as an MCP tool. Use @bughunter in Cursor Composer.",
-      command: `mkdir -p .cursor && echo '{"mcpServers":{"bughunter":{"type":"http","url":"${origin}/api/mcp/command","headers":{"Authorization":"Bearer ${key}"}}}}' > .cursor/mcp.json`,
+      steps: [
+        {
+          label: "Install MCP server",
+          command: `mkdir -p .cursor && echo '{"mcpServers":{"bughunter":{"type":"http","url":"${origin}/api/mcp/command","headers":{"Authorization":"Bearer ${key}"}}}}' > .cursor/mcp.json`,
+        },
+      ],
     },
     opencode: {
       title: "OpenCode",
-      desc: "Configures the MCP server. Then call /prcheck <number> from OpenCode.",
-      command: `mkdir -p .opencode && echo '{"mcpServers":{"bughunter":{"type":"http","url":"${origin}/api/mcp/command","headers":{"Authorization":"Bearer ${key}"}}}}' > .opencode/mcp.json`,
+      steps: [
+        {
+          label: "Install MCP server",
+          command: `mkdir -p .opencode && echo '{"mcpServers":{"bughunter":{"type":"http","url":"${origin}/api/mcp/command","headers":{"Authorization":"Bearer ${key}"}}}}' > .opencode/mcp.json`,
+        },
+      ],
     },
     codex: {
       title: "Codex",
-      desc: "Registers the MCP server. Use /prcheck <number> in Codex sessions.",
-      command: `codex mcp add bughunter --url ${origin}/api/mcp/command --bearer-token ${key}`,
+      steps: [
+        {
+          label: "Install MCP server",
+          command: `codex mcp add bughunter --url ${origin}/api/mcp/command --bearer-token ${key}`,
+        },
+      ],
     },
   };
 
-  const t = commands[tool];
+  const t = sections[tool];
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm" onClick={onClose}>
@@ -76,28 +94,29 @@ function InstallModal({ tool, origin, apiKey, onClose }: { tool: ToolId; origin:
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between p-5 border-b border-white/10">
-          <div className="flex items-center gap-3">
-            <h3 className="text-sm font-bold text-white uppercase tracking-wider font-mono">{t.title}</h3>
-          </div>
+          <h3 className="text-sm font-bold text-white uppercase tracking-wider font-mono">{t.title}</h3>
           <button onClick={onClose} className="p-1 hover:bg-white/10 rounded-lg text-slate-400 hover:text-white transition-colors cursor-pointer">
             <X size={16} />
           </button>
         </div>
-        <div className="p-5 space-y-4">
-          <p className="text-xs text-slate-400 font-mono leading-relaxed">{t.desc}</p>
-          <div className="relative">
-            <pre className="bg-black/80 rounded-lg p-4 text-[12px] font-mono text-cyan-300 overflow-x-auto whitespace-pre-wrap break-all leading-relaxed border border-white/5 select-all">
-              {t.command}
-            </pre>
-            <button
-              onClick={() => copy(t.command)}
-              className="absolute top-2 right-2 p-2 bg-slate-800/80 hover:bg-slate-700 rounded-lg text-slate-400 hover:text-cyan-400 transition-colors cursor-pointer"
-              title="Copy command"
-            >
-              {copied ? <Check size={14} /> : <Copy size={14} />}
-            </button>
-          </div>
-          <p className="text-[10px] text-slate-600 font-mono">Paste this in your terminal from the repo root.</p>
+        <div className="p-5 space-y-5">
+          {t.steps.map((step, i) => (
+            <div key={i} className="space-y-2">
+              <p className="text-xs text-slate-400 font-mono">{step.label}</p>
+              <div className="relative group">
+                <pre className="bg-black/80 rounded-lg p-3 text-[12px] font-mono text-cyan-300 overflow-x-auto whitespace-pre-wrap break-all leading-relaxed border border-white/5 select-all">
+                  {step.command}
+                </pre>
+                <button
+                  onClick={() => copy(step.command, `${tool}-${i}`)}
+                  className="absolute top-2 right-2 p-1.5 bg-slate-800/80 hover:bg-slate-700 rounded-lg text-slate-400 hover:text-cyan-400 transition-colors opacity-0 group-hover:opacity-100 cursor-pointer"
+                  title="Copy"
+                >
+                  {copiedSection === `${tool}-${i}` ? <Check size={13} /> : <Copy size={13} />}
+                </button>
+              </div>
+            </div>
+          ))}
         </div>
       </motion.div>
     </div>
