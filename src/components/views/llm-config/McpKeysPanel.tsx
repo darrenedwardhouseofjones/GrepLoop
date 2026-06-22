@@ -30,6 +30,7 @@ const tools: ToolConfig[] = [
 
 function InstallModal({ tool, origin, apiKey, onClose }: { tool: ToolId; origin: string; apiKey: string | null; onClose: () => void }) {
   const [copiedSection, setCopiedSection] = useState<string | null>(null);
+  const [manualKey, setManualKey] = useState("");
 
   const copy = (text: string, section: string) => {
     navigator.clipboard.writeText(text);
@@ -37,7 +38,7 @@ function InstallModal({ tool, origin, apiKey, onClose }: { tool: ToolId; origin:
     setTimeout(() => setCopiedSection(null), 2000);
   };
 
-  const key = apiKey || "gl_mcp_YOUR_KEY_HERE";
+  const key = apiKey || manualKey || "gl_mcp_YOUR_KEY_HERE";
 
   interface CmdSection { label: string; command: string; }
   const sections: Record<ToolId, { title: string; steps: CmdSection[] }> = {
@@ -100,6 +101,17 @@ function InstallModal({ tool, origin, apiKey, onClose }: { tool: ToolId; origin:
           </button>
         </div>
         <div className="p-5 space-y-5">
+          {!apiKey && (
+            <div className="space-y-2">
+              <p className="text-xs text-slate-400 font-mono">Paste your API key</p>
+              <input
+                value={manualKey}
+                onChange={(e) => setManualKey(e.target.value)}
+                placeholder="gl_mcp_..."
+                className="w-full bg-black/80 border border-white/10 rounded-lg px-3 py-2 text-xs font-mono text-cyan-300 placeholder:text-slate-600 focus:outline-none focus:border-cyan-500/40"
+              />
+            </div>
+          )}
           {t.steps.map((step, i) => (
             <div key={i} className="space-y-2">
               <p className="text-xs text-slate-400 font-mono">{step.label}</p>
