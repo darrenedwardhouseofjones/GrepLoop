@@ -1,8 +1,14 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/src/lib/prisma";
-import { findPrByIdOrNumber } from "@/src/lib/findPr";
+import { findPrByIdOrNumber, findPrByBranch } from "@/src/lib/findPr";
 import { runPrScan } from "@/reviewService";
 import { authenticateMcpRequest } from "@/src/lib/mcpAuth";
+
+async function resolvePr(body: any, cmdArg: string): Promise<any | null> {
+  if (cmdArg) return findPrByIdOrNumber(cmdArg);
+  if (body.repoId && body.branch) return findPrByBranch(body.repoId, body.branch);
+  return null;
+}
 
 export async function POST(req: Request) {
   const auth = await authenticateMcpRequest(req);
@@ -15,7 +21,7 @@ export async function POST(req: Request) {
   if (!command || typeof command !== "string") {
     return NextResponse.json({
       status: "Error",
-      message: "Command field is required. Example format: '/prcheck 2' or '/prcomments 2'."
+      message: "Send a command with optional repoId+branch. Examples:\n- '/prcheck 2'\n- '/prcheck' with { repoId: 'my-repo', branch: 'feature/xyz' }"
     }, { status: 400 });
   }
 
@@ -26,33 +32,28 @@ export async function POST(req: Request) {
 
   try {
     if (cmdName === "/prcheck" || cmdName === "/checkpr" || cmdName === "checkpr" || cmdName === "prcheck") {
-      if (!argVal) {
-        return NextResponse.json({
-          status: "Error",
-          message: "Please specify a PR ID or matching index number. Example: '/prcheck 2'."
-        }, { status: 400 });
-      }
-
-      const pr = await findPrByIdOrNumber(argVal);
+      const pr = await resolvePr(body, argVal);
       if (!pr) {
         return NextResponse.json({
           status: "Error",
-          message: `Pull Request context for descriptor "${argVal}" was not found.`
+          message: argVal
+            ? `Pull Request for "${argVal}" not found.`
+            : "No PR specified and no branch match. Provide a PR number, or pass repoId+branch.",
         });
       }
 
       const scanResult = await runPrScan(pr.id);
-      const isProductionReady = scanResult.rating >= 9;
+      const isProductionReady = scanResult.rating >= 4;
 
       return NextResponse.json({
         status: "Success",
         type: "check",
         message: `Inspected Pull Request ${pr.id}: "${pr.title}" completed successfully.`,
-        rating: `${scanResult.rating}/10`,
+        rating: `${scanResult.rating}/5`,
         productionGrade: isProductionReady ? "YES" : "NO",
         summary: isProductionReady
-          ? "Production readiness: APPROVED (Score 9+)"
-          : "Production readiness: REJECTED (Requires fixes. Below 9/10)",
+          ? "Production readiness: APPROVED (Score 4+)"
+          : "Production readiness: REJECTED (Requires fixes. Below 4/5)",
         findingsCount: scanResult.findings.length,
         findings: scanResult.findings.map((f: any) =>
           `[${f.category} | ${f.severity}] ${f.filename}:${f.line} - ${f.explanation}`
@@ -61,18 +62,13 @@ export async function POST(req: Request) {
     }
 
     if (cmdName === "/prcomments" || cmdName === "prcomments" || cmdName === "comments") {
-      if (!argVal) {
-        return NextResponse.json({
-          status: "Error",
-          message: "Please specify a PR ID or matching index number. Example: '/prcomments 2'."
-        }, { status: 400 });
-      }
-
-      const pr = await findPrByIdOrNumber(argVal);
+      const pr = await resolvePr(body, argVal);
       if (!pr) {
         return NextResponse.json({
           status: "Error",
-          message: `Pull Request context for descriptor "${argVal}" was not found.`
+          message: argVal
+            ? `Pull Request for "${argVal}" not found.`
+            : "No PR specified and no branch match. Provide a PR number, or pass repoId+branch.",
         });
       }
 
@@ -82,7 +78,7 @@ export async function POST(req: Request) {
         type: "comments",
         prId: pr.id,
         title: pr.title,
-        productionScore: pr.rating ? `${pr.rating}/10` : "Not Scanned Yet",
+        productionScore: pr.rating ? `${pr.rating}/5` : "Not Scanned Yet",
         comments: findings.map(f =>
           `[${f.category} | ${f.severity}] ${f.filename}:${f.line} - ${f.explanation}`
         )
@@ -92,9 +88,9 @@ export async function POST(req: Request) {
     return NextResponse.json({
       status: "Error",
       message:
-        `Command "${cmdName}" is unknown. Supported commands:\n` +
-        `- /prcheck <index> (Inspects the PR and rates 1-10)\n` +
-        `- /prcomments <index> (Retrieves review findings left in database)`
+        `Command "${cmdName}" is unknown. Supported:\n` +
+        `- /prcheck [number]   (Reviews a PR — use number or send repoId+branch)\n` +
+        `- /prcomments [number] (Gets review findings)`
     }, { status: 400 });
   } catch (err: any) {
     console.error("[MCP general action error]:", err);

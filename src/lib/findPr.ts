@@ -22,3 +22,11 @@ export async function findPrByIdOrNumber(param: string): Promise<any | null> {
   });
   return fallback || null;
 }
+
+export async function findPrByBranch(repoId: string, branch: string): Promise<any | null> {
+  const pr = await prisma.pullRequest.findFirst({
+    where: { repoId, sourceBranch: branch },
+    orderBy: { createdAt: "desc" },
+  });
+  return pr || null;
+}

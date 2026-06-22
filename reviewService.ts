@@ -102,7 +102,7 @@ const reviewResponseSchema = {
   properties: {
     rating: {
       type: "integer",
-      description: "The overall code quality rating of this PR, from 1 to 10. Grade 9 or 10 is production grade, 1-8 requires improvements.",
+      description: "The overall code quality rating of this PR, from 1 to 5. Grade 4 or 5 is production grade, 1-3 requires improvements.",
     },
     summary: {
       type: "string",
@@ -235,9 +235,9 @@ STRICT INSTRUCTIONS:
 6. Provide a code suggestion (if applicable) inside the 'diffSuggestion' field.
 7. Include a 'confidence' score from 0.0 to 1.0 for every finding. Be honest — if you're guessing, mark it low. If you can trace the exact bug path, mark it high.
 8. Conduct dynamic multi-hop investigation traces demonstrating how a bug propagates across referenced files in call chain (if applicable). Store elements of this path inside the 'evidenceChain' array.
-9. Grade the overall pull request on a scale from 1 to 10 points:
-   - Rating 9 or 10 indicates production-grade, highly secure, fully performant code.
-   - Any rating below 9 (1 to 8) is NOT production grade and requires attention.
+9. Grade the overall pull request on a scale from 1 to 5 points:
+   - Rating 4 or 5 indicates production-grade, highly secure, fully performant code.
+   - Any rating below 4 (1 to 3) is NOT production grade and requires attention.
 9. When you have gathered enough context, call the submitReview tool with the final assessment. If your endpoint does not support tool calling, respond with a single JSON object (no markdown fences) matching the schema: { rating, summary, findings[] }.`;
 
 /**

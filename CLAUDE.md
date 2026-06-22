@@ -57,7 +57,7 @@ See `prd.md` for the full product spec.
 
 ## Pre-push hook
 
-The pre-push hook at `scripts/hooks/pre-push` blocks pushes that fail GrepLoop AI review (rating < 9/10). Installed via `npm run install-hooks` or `npm run greploop install-hooks`. Bypass with `git push --no-verify`.
+The pre-push hook at `scripts/hooks/pre-push` blocks pushes that fail GrepLoop AI review (rating < 4/5). Installed via `npm run install-hooks` or `npm run greploop install-hooks`. Bypass with `git push --no-verify`.
 
 The hook calls `POST /api/hooks/prepush` which triggers `runPrScan()` and returns a pass/fail verdict.
 
@@ -69,10 +69,17 @@ All MCP API endpoints (`/api/mcp/*`, `/api/hooks/prepush`) require an API key vi
 
 ## Agent skill
 
-The `skills/bughunter/SKILL.md` file defines the `/bughunter` command for Claude Code and other agentic tools. Supports:
-- `/bughunter` or `/bughunter review` — review current branch
-- `/bughunter fix` — review + auto-fix + re-review
-- `/bughunter status` — show branch info and existing review results
+### Agent skills
+
+Two skills ship with the repo:
+
+- **`skills/bughunter/SKILL.md`** — `/bughunter` command. Reviews PRs via MCP and reports findings with confidence scores. Rating 1-5; 4-5 is production-grade.
+  - `/bughunter` or `/bughunter review [number]` — review current branch (auto-detects PR from git branch)
+  - `/bughunter status` — show existing review results
+
+- **`skills/bugfixer/SKILL.md`** — `/bugfixer` command. Auto-fix loop: review → fix → re-review until 4/5.
+  - `/bugfixer` — full loop
+  - `/bugfixer once` — single pass fixes
 
 ## Database
 

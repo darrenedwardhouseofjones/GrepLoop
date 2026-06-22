@@ -10,63 +10,93 @@ BugHunter is a self-hosted AI code review engine built on GrepLoop. It indexes t
 
 You drive it through the GrepLoop HTTP API. The review endpoint is synchronous — it blocks until the review completes (typically 30-120s for a full agentic loop).
 
+## How `/bughunter` finds the right PR
+
+- **`/bughunter 42`** — review PR #42 by number
+- **`/bughunter`** (no args) — the skill detects the current git repo and branch, then calls MCP with `{ repoId, branch }` to look up the matching PR
+- If neither a PR number nor a branch match is found, it tells the user the PR isn't registered in GrepLoop yet
+
+This means users can just run `/bughunter` in any project directory and it works — no need to remember PR numbers.
+
 All API endpoints require authentication. Pass your API key in the `Authorization` header:
 ```
 Authorization: Bearer gl_mcp_<your_key>
 ```
 Generate a key from the GrepLoop UI → Settings → MCP API Keys. If no key is configured, tell the user to create one.
 
-## Three ways to invoke
+## Two skills
 
-`/bughunter` works in three modes:
+Two separate skills, one for each job:
 
-- **`/bughunter`** or **`/bughunter review`** — Review the current branch. Runs the AI review and reports findings to the user.
-- **`/bughunter fix`** — Review + fix. Runs review, asks user which findings to address, applies the suggested fixes, commits, and re-reviews to confirm.
-- **`/bughunter status`** — Show the current branch and any existing review results without triggering a new scan.
+### `/bughunter` — Hunt (review & report)
+
+- **`/bughunter`** or **`/bughunter review [number]`** — Review the current PR. Returns a rating 1-5 and a list of findings with confidence scores.
+- **`/bughunter status`** — Show the current PR's last review result without triggering a new scan.
+
+If no PR number is given, the skill reads the current git branch and resolves the PR automatically.
+
+### `/bugfixer` — Fix (auto-fix loop)
+
+- **`/bugfixer`** — Review → fix → re-review until rating >= 4/5, then report pass.
+- **`/bugfixer once`** — Apply fixes for all findings above `minConfidence` in one pass (no loop).
+
+The fixer calls `/bughunter` to get findings, applies each fix, commits (`fix: address review findings`), then re-reviews. It loops until rating >= 4/5 or the user hits interrupt.
+
+## Rating scale
+
+The GrepLoop review returns a rating from 1 to 5:
+
+- **4–5** — Production grade, safe to merge
+- **1–3** — Needs fixes. Loop with `/bugfixer` until it passes.
 
 ## What the GrepLoop API returns
 
-`POST /api/hooks/prepush` accepts `{ branch, repoPath, sha }` and returns:
+`POST /api/mcp/command` with command `/prcheck <number>` or `{ repoId, branch }`:
 
 ```
 {
-  "passed": bool,          // true if rating >= 9
-  "rating": 1-10,          // overall quality score
-  "findings": [            // array of issues found
-    {
-      "category": "Correctness" | "Security" | "Performance" | "Accessibility" | "Style",
-      "severity": "blocker" | "warning" | "suggestion",
-      "filename": "path/to/file.ts",
-      "line": 42,
-      "explanation": "Human-readable explanation",
-      "diffSuggestion": "Optional suggested code fix",
-      "evidenceChain": [
-        { "file": "...", "line": 42, "text": "..." }
-      ]
-    }
-  ],
-  "message": "Summary string"
+  "status": "Success",
+  "rating": "4/5",
+  "productionGrade": "YES" | "NO",
+  "summary": "...",
+  "findingsCount": 3,
+  "findings": [
+    "[Security | blocker] src/auth.ts:42 - Unvalidated redirect...",
+    "[Correctness | warning] src/api.ts:88 - Missing error handling..."
+  ]
+}
+```
+
+`POST /api/mcp/command` with command `/prcomments <number>` returns the persisted findings:
+
+```
+{
+  "status": "Success",
+  "comments": [
+    { "category": "Security", "severity": "blocker", "filename": "src/auth.ts",
+      "line": 42, "comment": "...", "fixSuggestion": "...", "confidence": 0.92 }
+  ]
 }
 ```
 
 A non-200 response means the repo hasn't been indexed yet or the PR wasn't found. Surface the error message to the user with instructions.
 
-## Auto-fix protocol (`/bughunter fix`)
+## Auto-fix protocol (`/bugfixer`)
 
-When the user asks to fix findings, follow this loop:
+When fixing findings, follow this loop:
 
-1. **Call review** — `POST /api/hooks/prepush` with the current branch info
-2. **Present findings** — Show the user each finding grouped by severity (blocker first). Ask which they want to address.
-3. **Apply fixes** — For each selected finding, read the file at the specified line, understand the context, and apply the `diffSuggestion` code change.
-4. **Commit** — Commit the fixes with a message like `fix: address GrepLoop review findings`
-5. **Re-review** — Call the review endpoint again to confirm the fixes resolved the issues
-6. **Report** — Show the final verdict: pass or what remaining issues exist
-
-Only apply fixes the user explicitly approves. For `blocker` findings, recommend fixing them.
+1. **Call review** — `POST /api/mcp/command` with `/prcheck` (or pass `repoId`+`branch`)
+2. **Check rating** — If >= 4/5, report pass and exit
+3. **Present findings** — Show findings filtered by confidence (>= 0.5). Skip low-confidence noise.
+4. **Apply fixes** — For each finding, read the file at the specified line, understand context, apply the `diffSuggestion` code change.
+5. **Commit** — `fix: address review findings`
+6. **Re-review** — Call `/prcheck` again
+7. **Loop** — If still < 4/5, repeat. If 3+ iterations with no rating improvement, warn the user.
+8. **Report** — Final verdict: passed (4-5) or what remains
 
 ## Installing the pre-push hook
 
-Run `npm run greploop install-hooks` (or `npm run install-hooks`) to install the pre-push hook. This copies `scripts/hooks/pre-push` into `.git/hooks/pre-push`. The hook automatically blocks pushes that fail review, acting as a safety net even when you don't explicitly run `/bughunter`.
+Run `npm run greploop install-hooks` (or `npm run install-hooks`) to install the pre-push hook. This copies `scripts/hooks/pre-push` into `.git/hooks/pre-push`. The hook automatically blocks pushes that fail review (rating < 4/5), acting as a safety net even when you don't explicitly run `/bughunter`.
 
 ## Preconditions
 
