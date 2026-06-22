@@ -69,10 +69,10 @@ All MCP API endpoints (`/api/mcp/*`, `/api/hooks/prepush`) require an API key vi
 
 ## Agent skill
 
-The `skills/greploop/SKILL.md` file defines the `/greploop` command for Claude Code and other agentic tools. Supports:
-- `/greploop` or `/greploop review` — review current branch
-- `/greploop fix` — review + auto-fix + re-review
-- `/greploop status` — show branch info and existing review results
+The `skills/bughunter/SKILL.md` file defines the `/bughunter` command for Claude Code and other agentic tools. Supports:
+- `/bughunter` or `/bughunter review` — review current branch
+- `/bughunter fix` — review + auto-fix + re-review
+- `/bughunter status` — show branch info and existing review results
 
 ## Database
 

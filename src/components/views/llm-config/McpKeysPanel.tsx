@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { motion } from "motion/react";
-import { Check, Copy, Eye, EyeOff, Key, Plus, Trash2 } from "lucide-react";
+import { Check, Copy, Eye, EyeOff, Key, Plus, Trash2, X, Code, Terminal, Sparkles, Cpu } from "lucide-react";
 
 interface McpKeyView {
   id: string;
@@ -11,6 +11,170 @@ interface McpKeyView {
   createdAt: string;
   lastUsedAt: string | null;
   revoked: boolean;
+}
+
+type ToolId = "claude" | "cursor" | "opencode" | "codex";
+
+interface ToolConfig {
+  id: ToolId;
+  label: string;
+  icon: typeof Code;
+}
+
+const tools: ToolConfig[] = [
+  { id: "claude", label: "Claude Code", icon: Sparkles },
+  { id: "cursor", label: "Cursor", icon: Cpu },
+  { id: "opencode", label: "OpenCode", icon: Terminal },
+  { id: "codex", label: "Codex", icon: Code },
+];
+
+function InstallModal({ tool, origin, apiKey, onClose }: { tool: ToolId; origin: string; apiKey: string | null; onClose: () => void }) {
+  const [copiedSection, setCopiedSection] = useState<string | null>(null);
+
+  const copy = (text: string, section: string) => {
+    navigator.clipboard.writeText(text);
+    setCopiedSection(section);
+    setTimeout(() => setCopiedSection(null), 2000);
+  };
+
+  const key = apiKey || "gl_mcp_YOUR_KEY_HERE";
+
+  const instructions: Record<ToolId, { title: string; steps: { label: string; code: string; lang?: string }[] }> = {
+    claude: {
+      title: "Claude Code — BugHunter Skill",
+      steps: [
+        {
+          label: "Install the skill from your repo root:",
+          code: `cp -r skills/bughunter ~/.claude/skills/`,
+          lang: "bash",
+        },
+        {
+          label: "Set your API key in your shell (or .env):",
+          code: `export GREPLOOP_API_KEY='${key}'`,
+          lang: "bash",
+        },
+        {
+          label: "Then in any Claude Code session, use:",
+          code: `/bughunter review\n/bughunter fix\n/bughunter status`,
+          lang: "bash",
+        },
+      ],
+    },
+    cursor: {
+      title: "Cursor — MCP Server Config",
+      steps: [
+        {
+          label: "Add to your project's `.cursor/mcp.json`:",
+          code: JSON.stringify(
+            {
+              mcpServers: {
+                bughunter: {
+                  type: "http",
+                  url: `${origin}/api/mcp/command`,
+                  headers: { Authorization: `Bearer ${key}` },
+                },
+              },
+            },
+            null,
+            2
+          ),
+          lang: "json",
+        },
+        {
+          label: "Then use `@bughunter` with commands like:",
+          code: `/prcheck 2\n/prcomments 2`,
+          lang: "bash",
+        },
+      ],
+    },
+    opencode: {
+      title: "OpenCode — MCP Server Config",
+      steps: [
+        {
+          label: "Add to your `opencode.json` or tool config:",
+          code: JSON.stringify(
+            {
+              mcpServers: {
+                bughunter: {
+                  type: "http",
+                  url: `${origin}/api/mcp/command`,
+                  headers: { Authorization: `Bearer ${key}` },
+                },
+              },
+            },
+            null,
+            2
+          ),
+          lang: "json",
+        },
+        {
+          label: "Start OpenCode and invoke with:",
+          code: `/prcheck 2\n/prcomments 2`,
+          lang: "bash",
+        },
+      ],
+    },
+    codex: {
+      title: "Codex — CLI MCP Flag",
+      steps: [
+        {
+          label: "Pass the MCP server config when launching Codex:",
+          code: `codex --mcp '${JSON.stringify({
+            bughunter: {
+              type: "http",
+              url: `${origin}/api/mcp/command`,
+              headers: { Authorization: `Bearer ${key}` },
+            },
+          })}'`,
+          lang: "bash",
+        },
+        {
+          label: "Then use commands like:",
+          code: `/prcheck 2\n/prcomments 2`,
+          lang: "bash",
+        },
+      ],
+    },
+  };
+
+  const instr = instructions[tool];
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm" onClick={onClose}>
+      <motion.div
+        initial={{ opacity: 0, scale: 0.95 }}
+        animate={{ opacity: 1, scale: 1 }}
+        className="bg-[#0F1219] border border-white/10 rounded-2xl shadow-2xl w-full max-w-lg max-h-[80vh] overflow-y-auto mx-4"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between p-5 border-b border-white/10">
+          <h3 className="text-sm font-bold text-white uppercase tracking-wider font-mono">{instr.title}</h3>
+          <button onClick={onClose} className="p-1 hover:bg-white/10 rounded-lg text-slate-400 hover:text-white transition-colors cursor-pointer">
+            <X size={16} />
+          </button>
+        </div>
+        <div className="p-5 space-y-5">
+          {instr.steps.map((step, i) => (
+            <div key={i} className="space-y-2">
+              <p className="text-xs text-slate-400 font-mono">{step.label}</p>
+              <div className="relative group">
+                <pre className="bg-black/80 rounded-lg p-3 text-[11px] font-mono text-cyan-300 overflow-x-auto whitespace-pre-wrap break-all leading-relaxed border border-white/5">
+                  {step.code}
+                </pre>
+                <button
+                  onClick={() => copy(step.code, `${tool}-${i}`)}
+                  className="absolute top-2 right-2 p-1.5 bg-slate-800/80 hover:bg-slate-700 rounded-lg text-slate-400 hover:text-cyan-400 transition-colors opacity-0 group-hover:opacity-100 cursor-pointer"
+                  title="Copy"
+                >
+                  {copiedSection === `${tool}-${i}` ? <Check size={12} /> : <Copy size={12} />}
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      </motion.div>
+    </div>
+  );
 }
 
 export default function McpKeysPanel() {
@@ -22,6 +186,12 @@ export default function McpKeysPanel() {
   const [showKey, setShowKey] = useState(false);
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [activeTool, setActiveTool] = useState<ToolId | null>(null);
+  const [origin, setOrigin] = useState("http://localhost:3300");
+
+  useEffect(() => {
+    setOrigin(window.location.origin);
+  }, []);
 
   const fetchKeys = async () => {
     try {
@@ -109,10 +279,9 @@ export default function McpKeysPanel() {
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
                       <span className="text-xs font-mono font-bold text-slate-300">{k.name}</span>
-                      {k.revoked && (
+                      {k.revoked ? (
                         <span className="text-[9px] text-rose-400 bg-rose-500/10 px-1.5 py-0.5 rounded border border-rose-500/20 font-mono uppercase">Revoked</span>
-                      )}
-                      {!k.revoked && (
+                      ) : (
                         <span className="text-[9px] text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/20 font-mono uppercase">Active</span>
                       )}
                     </div>
@@ -138,7 +307,7 @@ export default function McpKeysPanel() {
         )}
 
         {newKeyValue ? (
-            <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-4 space-y-3">
+          <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-4 space-y-3">
             <div className="flex items-center gap-2">
               <div className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
               <p className="text-xs text-amber-300 font-mono font-bold">Save this key — it won't be shown again</p>
@@ -189,6 +358,29 @@ export default function McpKeysPanel() {
           </div>
         )}
       </div>
+
+      <div className="p-5 bg-[#0F1219] border border-white/10 rounded-xl">
+        <h4 className="text-[10px] uppercase tracking-[0.2em] text-slate-500 font-mono font-bold mb-3">Connect Your Tools</h4>
+        <div className="flex flex-wrap gap-2">
+          {tools.map((t) => {
+            const Icon = t.icon;
+            return (
+              <button
+                key={t.id}
+                onClick={() => setActiveTool(t.id)}
+                className="flex items-center gap-2 px-3 py-2 bg-slate-900/60 hover:bg-slate-800 border border-white/10 hover:border-cyan-500/30 rounded-lg text-xs font-mono text-slate-400 hover:text-cyan-300 transition-all cursor-pointer"
+              >
+                <Icon size={14} />
+                {t.label}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {activeTool && (
+        <InstallModal tool={activeTool} origin={origin} apiKey={newKeyValue} onClose={() => setActiveTool(null)} />
+      )}
     </motion.div>
   );
 }
