@@ -140,6 +140,10 @@ const reviewResponseSchema = {
             type: "string",
             description: "Recommended code changes or fixes to address this finding.",
           },
+          confidence: {
+            type: "number",
+            description: "Confidence score from 0.0 to 1.0 indicating how certain you are this is a real issue. High confidence (>0.8) = definite bug. Low confidence (<0.4) = possible nitpick.",
+          },
           evidenceChain: {
             type: "array",
             description: "Multi-hop trace showing how a bug propagates across related files or functions. List of trace points in execution path order.",
@@ -154,7 +158,7 @@ const reviewResponseSchema = {
             },
           },
         },
-        required: ["category", "severity", "filename", "line", "explanation"],
+        required: ["category", "severity", "filename", "line", "explanation", "confidence"],
       },
     },
   },
@@ -229,8 +233,9 @@ STRICT INSTRUCTIONS:
 4. Assign severities to findings strictly from this list: "blocker", "warning", "suggestion".
 5. Provide a clear, actionable line reference for each finding matching the input files.
 6. Provide a code suggestion (if applicable) inside the 'diffSuggestion' field.
-7. Conduct dynamic multi-hop investigation traces demonstrating how a bug propagates across referenced files in call chain (if applicable). Store elements of this path inside the 'evidenceChain' array.
-8. Grade the overall pull request on a scale from 1 to 10 points:
+7. Include a 'confidence' score from 0.0 to 1.0 for every finding. Be honest — if you're guessing, mark it low. If you can trace the exact bug path, mark it high.
+8. Conduct dynamic multi-hop investigation traces demonstrating how a bug propagates across referenced files in call chain (if applicable). Store elements of this path inside the 'evidenceChain' array.
+9. Grade the overall pull request on a scale from 1 to 10 points:
    - Rating 9 or 10 indicates production-grade, highly secure, fully performant code.
    - Any rating below 9 (1 to 8) is NOT production grade and requires attention.
 9. When you have gathered enough context, call the submitReview tool with the final assessment. If your endpoint does not support tool calling, respond with a single JSON object (no markdown fences) matching the schema: { rating, summary, findings[] }.`;
@@ -445,6 +450,7 @@ ${diffPayload}`;
         explanation: finding.explanation || "No explanation provided.",
         diffSuggestion: finding.diffSuggestion || null,
         evidenceChain: finding.evidenceChain ? JSON.stringify(finding.evidenceChain) : null,
+        confidence: finding.confidence != null ? finding.confidence : null,
         timestamp: new Date().toISOString(),
       },
     });

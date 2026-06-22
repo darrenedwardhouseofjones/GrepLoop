@@ -90,6 +90,7 @@ model ReviewFinding {
   explanation    String
   diffSuggestion String?
   evidenceChain  String?
+  confidence     Float?
   timestamp      String
   pullRequest    PullRequest @relation(fields: [prId], references: [id], onDelete: Cascade)
 
