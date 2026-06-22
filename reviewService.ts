@@ -372,7 +372,7 @@ ${diffPayload}`;
                 const edges = await prisma.edge.findMany({ where: { repoId: pr.repoId, toId: fnArgs.symbolId } });
                 if (edges && edges.length > 0) toolResult = JSON.stringify(edges);
               } else if (fnName === "findSimilar") {
-                const idxSvc = require("./src/services/indexingService").IndexingService;
+                const { IndexingService: idxSvc } = await import("./src/services/indexingService");
                 const scored = await idxSvc.semanticSearch(pr.repoId, fnArgs.query, 5);
                 if (scored && scored.length > 0) toolResult = JSON.stringify(scored);
               }

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { motion } from "motion/react";
-import { Check, Copy, Key, Plus, Trash2 } from "lucide-react";
+import { Check, Copy, Eye, EyeOff, Key, Plus, Trash2 } from "lucide-react";
 
 interface McpKeyView {
   id: string;
@@ -19,6 +19,7 @@ export default function McpKeysPanel() {
   const [newKeyName, setNewKeyName] = useState("");
   const [creating, setCreating] = useState(false);
   const [newKeyValue, setNewKeyValue] = useState<string | null>(null);
+  const [showKey, setShowKey] = useState(false);
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -137,21 +138,32 @@ export default function McpKeysPanel() {
         )}
 
         {newKeyValue ? (
-          <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-4 space-y-3">
+            <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-4 space-y-3">
             <div className="flex items-center gap-2">
               <div className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
               <p className="text-xs text-amber-300 font-mono font-bold">Save this key — it won't be shown again</p>
             </div>
-            <div className="bg-black/60 rounded-lg p-3 text-xs font-mono text-amber-200 break-all select-all leading-relaxed">
-              {newKeyValue}
+            <div className="bg-black/60 rounded-lg p-3 text-xs font-mono text-amber-200 break-all select-all leading-relaxed flex items-center justify-between gap-2">
+              <span className="min-w-0 truncate">
+                {showKey ? newKeyValue : newKeyValue!.replace(/.(?=.{4})/g, "*")}
+              </span>
+              <div className="flex items-center gap-1 shrink-0">
+                <button
+                  onClick={() => setShowKey((v) => !v)}
+                  className="p-1.5 hover:bg-amber-500/10 rounded-lg text-amber-400 hover:text-amber-300 transition-colors cursor-pointer"
+                  title={showKey ? "Hide key" : "Show key"}
+                >
+                  {showKey ? <EyeOff size={14} /> : <Eye size={14} />}
+                </button>
+                <button
+                  onClick={() => { navigator.clipboard.writeText(newKeyValue!); setCopied(true); setTimeout(() => setCopied(false), 2000); }}
+                  className="p-1.5 hover:bg-amber-500/10 rounded-lg text-amber-400 hover:text-amber-300 transition-colors cursor-pointer"
+                  title="Copy to clipboard"
+                >
+                  {copied ? <Check size={14} /> : <Copy size={14} />}
+                </button>
+              </div>
             </div>
-            <button
-              onClick={() => { navigator.clipboard.writeText(newKeyValue); setCopied(true); setTimeout(() => setCopied(false), 2000); }}
-              className="flex items-center gap-1.5 text-xs text-amber-400 hover:text-amber-300 font-mono transition-colors"
-            >
-              {copied ? <Check size={13} /> : <Copy size={13} />}
-              <span>{copied ? "Copied!" : "Copy to clipboard"}</span>
-            </button>
           </div>
         ) : (
           <div className="space-y-3">
