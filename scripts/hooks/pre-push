@@ -1,0 +1,50 @@
+#!/bin/sh
+# GrepLoop pre-push hook
+# Installed by: greploop install-hooks
+#
+# Blocks pushes that fail the GrepLoop AI review (rating < 9/10).
+# Bypass with: git push --no-verify
+#
+# Reads branch info from git's pre-push stdin and calls the GrepLoop API.
+
+GREPLOOP_URL="${GREPLOOP_URL:-http://localhost:3000}"
+REPO_PATH="$(git rev-parse --show-toplevel 2>/dev/null)"
+
+if [ -z "$REPO_PATH" ]; then
+  exit 0
+fi
+
+while read local_ref local_sha remote_ref remote_sha; do
+  branch="${local_ref#refs/heads/}"
+
+  case "$branch" in
+    main|master|develop) continue ;;
+  esac
+
+  if [ "$local_sha" = "0000000000000000000000000000000000000000" ]; then
+    continue
+  fi
+
+  result=$(curl -s -m 300 "$GREPLOOP_URL/api/hooks/prepush" \
+    -H "Content-Type: application/json" \
+    -d "{\"branch\":\"$branch\",\"repoPath\":\"$REPO_PATH\",\"sha\":\"$local_sha\"")
+
+  passed=$(echo "$result" | grep -o '"passed":[^,}]*' | cut -d: -f2)
+  rating=$(echo "$result" | grep -o '"rating":[^,}]*' | cut -d: -f2)
+  error=$(echo "$result" | grep -o '"error":"[^"]*"' | head -1 | cut -d\" -f4)
+
+  if [ "$passed" = "true" ]; then
+    echo "✓ GrepLoop: branch '$branch' approved ($rating/10)"
+  elif [ -n "$error" ]; then
+    echo "⚠ GrepLoop: $error"
+    echo "  Push blocked. Fix the issue or use 'git push --no-verify' to bypass."
+    exit 1
+  else
+    echo "✗ GrepLoop: branch '$branch' blocked ($rating/10 — needs 9+)"
+    echo "  Review findings in the GrepLoop UI or run '/greploop fix' in your agent."
+    echo "  To bypass: git push --no-verify"
+    exit 1
+  fi
+done
+
+exit 0

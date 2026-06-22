@@ -51,6 +51,21 @@ See `prd.md` for the full product spec.
 - `npm run start` — production server
 - `npm run lint` — `tsc --noEmit`
 - `npm run clean` — `rm -rf .next`
+- `npm run greploop` — `node scripts/greploop.mjs` (CLI companion: `npm run greploop install-hooks`, `npm run greploop review <branch>`)
+- `npm run install-hooks` — installs the pre-push git hook into `.git/hooks/pre-push`
+
+## Pre-push hook
+
+The pre-push hook at `scripts/hooks/pre-push` blocks pushes that fail GrepLoop AI review (rating < 9/10). Installed via `npm run install-hooks` or `npm run greploop install-hooks`. Bypass with `git push --no-verify`.
+
+The hook calls `POST /api/hooks/prepush` which triggers `runPrScan()` and returns a pass/fail verdict.
+
+## Agent skill
+
+The `skills/greploop/SKILL.md` file defines the `/greploop` command for Claude Code and other agentic tools. Supports:
+- `/greploop` or `/greploop review` — review current branch
+- `/greploop fix` — review + auto-fix + re-review
+- `/greploop status` — show branch info and existing review results
 
 ## Database
 
