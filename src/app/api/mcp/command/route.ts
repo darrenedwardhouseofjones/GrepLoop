@@ -4,13 +4,229 @@ import { findPrByIdOrNumber, findPrByBranch } from "@/src/lib/findPr";
 import { runPrScan } from "@/reviewService";
 import { authenticateMcpRequest } from "@/src/lib/mcpAuth";
 
+type ResolveFn = (body: any, cmdArg: string) => Promise<any | null>;
 async function resolvePr(body: any, cmdArg: string): Promise<any | null> {
   if (cmdArg) return findPrByIdOrNumber(cmdArg);
   if (body.repoId && body.branch) return findPrByBranch(body.repoId, body.branch);
   return null;
 }
 
+// ── MCP Streamable HTTP session store ──
+const sessions = new Map<string, string[]>();
+
+// ── Tool definitions ──
+const TOOLS = [
+  {
+    name: "prcheck",
+    description: "Review a pull request. Pass number=PR_ID, or repoId+branch for branch-based lookup. Returns rating 1-5 and findings.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        number: { type: "string", description: "PR number (e.g. '2')" },
+        repoId: { type: "string", description: "Repository ID" },
+        branch: { type: "string", description: "Branch name (used with repoId)" },
+      },
+    },
+  },
+  {
+    name: "prcomments",
+    description: "Get persisted review findings for a pull request. Pass number=PR_ID, or repoId+branch.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        number: { type: "string", description: "PR number" },
+        repoId: { type: "string", description: "Repository ID" },
+        branch: { type: "string", description: "Branch name (used with repoId)" },
+      },
+    },
+  },
+  {
+    name: "prlist",
+    description: "List all pull requests for a repository with their ratings. Pass repoId.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        repoId: { type: "string", description: "Repository ID (required)" },
+      },
+      required: ["repoId"],
+    },
+  },
+];
+
+// ── Tool handlers ──
+async function handlePrCheck(args: any): Promise<string> {
+  const pr = args.number
+    ? await findPrByIdOrNumber(args.number)
+    : args.repoId && args.branch
+      ? await findPrByBranch(args.repoId, args.branch)
+      : null;
+  if (!pr) return `PR not found. Provide "number" or "repoId"+"branch".`;
+
+  const sr = await runPrScan(pr.id);
+  const pass = sr.rating >= 4;
+  let out = `## PR #${pr.id} — "${pr.title}"\n**Rating: ${sr.rating}/5** — ${pass ? "✅ PASS" : "❌ FAIL"}\n\n`;
+  if (sr.findings.length === 0) {
+    out += "No findings.\n";
+  } else {
+    for (const f of sr.findings) {
+      out += `- [${f.category}|${f.severity}] ${f.filename}:${f.line} (confidence: ${((f.confidence ?? 0.5) * 100).toFixed(0)}%)\n  ${f.explanation}\n`;
+    }
+  }
+  return out;
+}
+
+async function handlePrComments(args: any): Promise<string> {
+  const pr = args.number
+    ? await findPrByIdOrNumber(args.number)
+    : args.repoId && args.branch
+      ? await findPrByBranch(args.repoId, args.branch)
+      : null;
+  if (!pr) return `PR not found. Provide "number" or "repoId"+"branch".`;
+
+  const findings = await prisma.reviewFinding.findMany({ where: { prId: pr.id } });
+  if (findings.length === 0) return "No findings for this PR.";
+  let out = `## Findings for PR #${pr.id}\n\n`;
+  for (const f of findings) {
+    out += `- [${f.category}|${f.severity}] ${f.filename}:${f.line}\n  ${f.explanation}\n`;
+  }
+  return out;
+}
+
+async function handlePrList(args: any): Promise<string> {
+  if (!args.repoId) return 'Pass "repoId" to list PRs.';
+  const prs = await prisma.pullRequest.findMany({
+    where: { repoId: args.repoId },
+    orderBy: { createdAt: "desc" },
+    take: 20,
+  });
+  if (prs.length === 0) return "No PRs found for this repo.";
+  let out = `## Pull Requests\n\n`;
+  for (const p of prs) {
+    out += `- **#${p.id.replace(/^pr-?/, "")}** — ${p.title} (${p.sourceBranch}) — ${p.rating != null ? `${p.rating}/5` : "Not scanned"}\n`;
+  }
+  return out;
+}
+
+const toolHandlers: Record<string, (args: any) => Promise<string>> = {
+  prcheck: handlePrCheck,
+  prcomments: handlePrComments,
+  prlist: handlePrList,
+};
+
+// ── GET: SSE stream for MCP streamable HTTP ──
+export async function GET(req: Request) {
+  const url = new URL(req.url);
+  const sessionId = url.searchParams.get("sessionId") || crypto.randomUUID();
+  const messageUrl = `/api/mcp/command?sessionId=${sessionId}`;
+
+  sessions.set(sessionId, []);
+
+  const stream = new ReadableStream({
+    start(controller) {
+      const sse = (event: string, data: string) => {
+        controller.enqueue(new TextEncoder().encode(`event: ${event}\ndata: ${data}\n\n`));
+      };
+
+      // MCP streamable HTTP: send endpoint event with sessionId
+      sse("endpoint", JSON.stringify({ endpoint: messageUrl, sessionId }));
+
+      const poll = setInterval(() => {
+        const q = sessions.get(sessionId);
+        if (q && q.length > 0) {
+          const batch = q.splice(0);
+          for (const msg of batch) sse("message", msg);
+        }
+      }, 200);
+
+      const keepalive = setInterval(() => {
+        controller.enqueue(new TextEncoder().encode(": keepalive\n\n"));
+      }, 15000);
+
+      req.signal.addEventListener("abort", () => {
+        clearInterval(poll);
+        clearInterval(keepalive);
+        sessions.delete(sessionId);
+      });
+    },
+  });
+
+  return new Response(stream, {
+    headers: {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      Connection: "keep-alive",
+    },
+  });
+}
+
+// ── POST: JSON-RPC (when sessionId present) or legacy command format ──
 export async function POST(req: Request) {
+  const url = new URL(req.url);
+  const sessionId = url.searchParams.get("sessionId");
+
+  if (sessionId) {
+    return handleJsonRpc(req, sessionId);
+  }
+
+  return handleLegacyCommand(req);
+}
+
+async function handleJsonRpc(req: Request, sessionId: string) {
+  const auth = await authenticateMcpRequest(req);
+  if (!auth.ok) {
+    return NextResponse.json({ jsonrpc: "2.0", id: null, error: { code: -32001, message: auth.error } }, { status: 401 });
+  }
+
+  const body = await req.json().catch(() => ({}));
+  const { method, id, params } = body;
+
+  // JSON-RPC notification (no id) — never respond
+  if (id === undefined || id === null) {
+    return new Response(null, { status: 202 });
+  }
+
+  if (method === "initialize") {
+    return NextResponse.json({
+      jsonrpc: "2.0", id,
+      result: {
+        protocolVersion: "2024-11-05",
+        capabilities: { tools: {} },
+        serverInfo: { name: "bughunter", version: "1.0.0" },
+      },
+    });
+  }
+
+  if (method === "tools/list") {
+    return NextResponse.json({
+      jsonrpc: "2.0", id,
+      result: { tools: TOOLS },
+    });
+  }
+
+  if (method === "tools/call") {
+    const toolName = params?.name;
+    const args = params?.arguments ?? {};
+    if (!toolName || !toolHandlers[toolName]) {
+      return NextResponse.json({
+        jsonrpc: "2.0", id,
+        error: { code: -32601, message: `Unknown tool: ${toolName}` },
+      });
+    }
+    const result = await toolHandlers[toolName](args);
+    return NextResponse.json({
+      jsonrpc: "2.0", id,
+      result: { content: [{ type: "text", text: result }] },
+    });
+  }
+
+  return NextResponse.json({
+    jsonrpc: "2.0", id,
+    error: { code: -32601, message: `Unknown method: ${method}` },
+  });
+}
+
+// ── Legacy command format (no sessionId) ──
+async function handleLegacyCommand(req: Request) {
   const auth = await authenticateMcpRequest(req);
   if (!auth.ok) {
     return NextResponse.json({ status: "Error", message: auth.error }, { status: 401 });
@@ -21,110 +237,59 @@ export async function POST(req: Request) {
   if (!command || typeof command !== "string") {
     return NextResponse.json({
       status: "Error",
-      message: "Send a command with optional repoId+branch. Examples:\n- '/prcheck 2'\n- '/prcheck' with { repoId: 'my-repo', branch: 'feature/xyz' }"
+      message: "Send a command. Examples:\n- '/prcheck 2'\n- '/prcheck' with { repoId: 'my-repo', branch: 'feature/xyz' }"
     }, { status: 400 });
   }
 
-  const cleanCommand = command.trim();
-  const parts = cleanCommand.split(/\s+/);
+  const parts = command.trim().split(/\s+/);
   const cmdName = parts[0];
   const argVal = parts.slice(1).join(" ");
 
   try {
-    if (cmdName === "/prcheck" || cmdName === "/checkpr" || cmdName === "checkpr" || cmdName === "prcheck") {
+    if (cmdName.endsWith("prcheck") || cmdName.endsWith("checkpr")) {
       const pr = await resolvePr(body, argVal);
-      if (!pr) {
-        return NextResponse.json({
-          status: "Error",
-          message: argVal
-            ? `Pull Request for "${argVal}" not found.`
-            : "No PR specified and no branch match. Provide a PR number, or pass repoId+branch.",
-        });
-      }
-
-      const scanResult = await runPrScan(pr.id);
-      const isProductionReady = scanResult.rating >= 4;
-
+      if (!pr) return NextResponse.json({ status: "Error", message: "PR not found." });
+      const sr = await runPrScan(pr.id);
       return NextResponse.json({
-        status: "Success",
-        type: "check",
-        message: `Inspected Pull Request ${pr.id}: "${pr.title}" completed successfully.`,
-        rating: `${scanResult.rating}/5`,
-        productionGrade: isProductionReady ? "YES" : "NO",
-        summary: isProductionReady
-          ? "Production readiness: APPROVED (Score 4+)"
-          : "Production readiness: REJECTED (Requires fixes. Below 4/5)",
-        findingsCount: scanResult.findings.length,
-        findings: scanResult.findings.map((f: any) =>
+        status: "Success", type: "check", rating: `${sr.rating}/5`,
+        productionGrade: sr.rating >= 4 ? "YES" : "NO",
+        findingsCount: sr.findings.length,
+        findings: sr.findings.map((f: any) =>
           `[${f.category} | ${f.severity}] ${f.filename}:${f.line} - ${f.explanation}`
-        )
+        ),
       });
     }
 
-    if (cmdName === "/prlist" || cmdName === "prlist" || cmdName === "list") {
-      if (!body.repoId) {
-        return NextResponse.json({
-          status: "Error",
-          message: "Pass { repoId } in the request body to list PRs."
-        }, { status: 400 });
-      }
-
-      const prs = await prisma.pullRequest.findMany({
-        where: { repoId: body.repoId },
-        orderBy: { createdAt: "desc" },
-        take: 20,
-        select: { id: true, title: true, sourceBranch: true, rating: true, status: true, createdAt: true },
-      });
-
+    if (cmdName.endsWith("prcomments") || cmdName.endsWith("comments")) {
+      const pr = await resolvePr(body, argVal);
+      if (!pr) return NextResponse.json({ status: "Error", message: "PR not found." });
+      const findings = await prisma.reviewFinding.findMany({ where: { prId: pr.id } });
       return NextResponse.json({
-        status: "Success",
-        type: "list",
-        repoId: body.repoId,
+        status: "Success", type: "comments",
+        productionScore: pr.rating ? `${pr.rating}/5` : "Not Scanned Yet",
+        comments: findings.map((f: any) =>
+          `[${f.category} | ${f.severity}] ${f.filename}:${f.line} - ${f.explanation}`
+        ),
+      });
+    }
+
+    if (cmdName.endsWith("prlist") || cmdName.endsWith("list")) {
+      if (!body.repoId) return NextResponse.json({ status: "Error", message: "Pass { repoId }." }, { status: 400 });
+      const prs = await prisma.pullRequest.findMany({
+        where: { repoId: body.repoId }, orderBy: { createdAt: "desc" }, take: 20,
+      });
+      return NextResponse.json({
+        status: "Success", type: "list", repoId: body.repoId,
         pullRequests: prs.map(p => ({
-          number: p.id.replace(/^pr-?/, ""),
-          id: p.id,
-          title: p.title,
-          branch: p.sourceBranch,
-          rating: p.rating != null ? `${p.rating}/5` : "Not scanned",
-          status: p.status,
-          createdAt: p.createdAt,
+          number: p.id.replace(/^pr-?/, ""), id: p.id, title: p.title,
+          branch: p.sourceBranch, rating: p.rating != null ? `${p.rating}/5` : "Not scanned",
         })),
       });
     }
 
-    if (cmdName === "/prcomments" || cmdName === "prcomments" || cmdName === "comments") {
-      const pr = await resolvePr(body, argVal);
-      if (!pr) {
-        return NextResponse.json({
-          status: "Error",
-          message: argVal
-            ? `Pull Request for "${argVal}" not found.`
-            : "No PR specified and no branch match. Provide a PR number, or pass repoId+branch.",
-        });
-      }
-
-      const findings = await prisma.reviewFinding.findMany({ where: { prId: pr.id } });
-      return NextResponse.json({
-        status: "Success",
-        type: "comments",
-        prId: pr.id,
-        title: pr.title,
-        productionScore: pr.rating ? `${pr.rating}/5` : "Not Scanned Yet",
-        comments: findings.map(f =>
-          `[${f.category} | ${f.severity}] ${f.filename}:${f.line} - ${f.explanation}`
-        )
-      });
-    }
-
-    return NextResponse.json({
-      status: "Error",
-      message:
-        `Command "${cmdName}" is unknown. Supported:\n` +
-        `- /prcheck [number]   (Reviews a PR — use number or send repoId+branch)\n` +
-        `- /prcomments [number] (Gets review findings)`
-    }, { status: 400 });
+    return NextResponse.json({ status: "Error", message: `Unknown command: ${cmdName}` }, { status: 400 });
   } catch (err: any) {
-    console.error("[MCP general action error]:", err);
+    console.error("[MCP error]:", err);
     return NextResponse.json({ status: "Error", message: err.message }, { status: 500 });
   }
 }
