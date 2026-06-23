@@ -3,18 +3,19 @@ import { prisma } from "@/src/lib/prisma";
 import { getRealLocalPrs } from "@/src/lib/getRealLocalPrs";
 
 /**
- * In-process set of repos currently being rescanned. Prevents the
- * background recompute from piling up when reads come faster than
- * the git scan can complete (e.g. the 15s poller vs a 60s scan).
- * Lives only in this dev server process — fine for a single-host dev
- * tool, would need to be Redis-backed (or dropped) for multi-instance.
+ * Map of in-flight refresh promises keyed by repo ID. Prevents the
+ * stale-delete / upsert gap in getRealLocalPrs() from being observed
+ * by concurrent readers: every GET that arrives while a refresh is
+ * in progress waits for the same promise, then reads a consistent
+ * snapshot. Lives only in this dev server process.
  */
-const refreshing = new Set<string>();
+const refreshPromises = new Map<string, Promise<any>>();
 
 /**
- * Read is pure DB. The expensive git rescan runs fire-and-forget in
- * the background; the next poll picks up any changes. This keeps
- * read latency down to a single findMany (sub-100ms on Supabase).
+ * Returns the current PR list for a repo. Ensures the git-based PR
+ * scan runs at most once concurrently per repo — all callers during
+ * the scan wait for the same result, so no one observes the partial
+ * state inside getRealLocalPrs()'s delete-then-upsert update.
  */
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -24,12 +25,14 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
       return NextResponse.json({ error: "Repository not found" }, { status: 404 });
     }
 
-    if (!refreshing.has(id)) {
-      refreshing.add(id);
-      void getRealLocalPrs(repo.path, id)
-        .catch((err) => console.warn(`Background PR refresh failed for ${id}:`, err))
-        .finally(() => refreshing.delete(id));
+    if (!refreshPromises.has(id)) {
+      refreshPromises.set(id,
+        getRealLocalPrs(repo.path, id)
+          .catch((err) => console.warn(`Background PR refresh failed for ${id}:`, err))
+          .finally(() => refreshPromises.delete(id))
+      );
     }
+    await refreshPromises.get(id)!;
 
     const prs = await prisma.pullRequest.findMany({
       where: { repoId: id },

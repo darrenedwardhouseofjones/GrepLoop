@@ -68,7 +68,7 @@ export default function PrsView({
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
       transition={{ duration: 0.1 }}
-      className="flex-1 flex flex-col xl:flex-row gap-5 overflow-hidden"
+      className="flex-1 flex flex-col xl:flex-row gap-5 overflow-hidden min-h-0"
     >
       <div className="flex-1 flex flex-col space-y-4 overflow-y-auto min-w-0 pr-1">
         <PrHeader
