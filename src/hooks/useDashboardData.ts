@@ -288,6 +288,7 @@ export function useDashboardData() {
           notice: result.systemWarn,
         });
         await fetchPrDetails(selectedPrId);
+        if (selectedRepoId) await fetchPrsForSelectedRepo(selectedRepoId, true);
         await fetchRepos();
         await fetchLogs();
       } else if (res.status === 409 && result.error === "INDEX_REQUIRED") {
@@ -370,6 +371,7 @@ export function useDashboardData() {
   const handleTriggerReviewPass = () => {
     fetchRepos();
     fetchLogs();
+    if (selectedRepoId) fetchPrsForSelectedRepo(selectedRepoId, true);
     if (selectedPrId) fetchPrDetails(selectedPrId);
   };
 
