@@ -1,5 +1,6 @@
 import { prisma } from "./src/lib/prisma";
 import { getChatChain } from "./src/lib/llmClient";
+import { randomUUID } from "node:crypto";
 
 export interface ScanResult {
   success: boolean;
@@ -7,6 +8,16 @@ export interface ScanResult {
   findings: any[];
   usedModel: string;
   systemWarn?: string | null;
+}
+
+async function logReview(prId: string, message: string, level: string = "info") {
+  try {
+    await prisma.reviewLog.create({
+      data: { id: randomUUID(), prId, message, level },
+    });
+  } catch {
+    // Best-effort — never break the review for a log write failure.
+  }
 }
 
 /**
@@ -288,6 +299,7 @@ ${diffPayload}`;
         while (loopCount < 8 && !finalReview) {
           loopCount++;
           console.log(`[review] iteration ${loopCount}/8 provider=${name}`);
+          void logReview(prId, `Iteration ${loopCount}/8 — ${name}`, "info");
           const response = await client.chat.completions.create({
             model,
             messages,
@@ -320,6 +332,7 @@ ${diffPayload}`;
                 console.log(
                   `[review] submitReview received: rating=${fnArgs.rating} findings=${fnArgs.findings?.length ?? 0} provider=${name}`,
                 );
+                void logReview(prId, `submitReview: rating=${fnArgs.rating}, ${fnArgs.findings?.length ?? 0} findings`, "info");
                 finalReview = fnArgs;
                 break;
               }
@@ -355,8 +368,10 @@ ${diffPayload}`;
                 console.error(`Tool ${fnName} failed:`, e);
                 resultSummary = `error: ${(e as any)?.message || String(e)}`;
                 toolResult = `Tool error: ${(e as any)?.message || String(e)}`;
+                void logReview(prId, `Tool ${fnName} failed: ${(e as any)?.message || String(e)}`, "error");
               }
               console.log(`[review] tool ${fnName} → ${resultSummary}`);
+              void logReview(prId, `Tool: ${fnName} → ${resultSummary}`, "tool_call");
 
               messages.push({
                 role: "tool",
@@ -393,6 +408,7 @@ ${diffPayload}`;
           console.log(
             `[review] loop exited without submitReview (iterations used: ${loopCount}, last message had tool_calls: ${lastHadToolCalls}) provider=${name}`,
           );
+          void logReview(prId, `Loop exhausted — no submitReview after ${loopCount} iterations (last had tool_calls: ${lastHadToolCalls})`, "warn");
         }
 
         if (finalReview) {
@@ -403,6 +419,7 @@ ${diffPayload}`;
         // Fall through to the next provider (if any).
       } catch (err: any) {
         console.warn(`[review] chat provider ${name} failed: ${err.message}`);
+        void logReview(prId, `Provider ${name} failed: ${err.message}`, "error");
         agenticError = `${name}: ${err.message}`;
         // try next provider
       }

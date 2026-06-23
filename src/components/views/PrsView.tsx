@@ -15,6 +15,7 @@ import {
 import type { PRFile, PullRequest, ReviewFinding } from "../../lib/types";
 import { getStatusBadgeStyle } from "../../lib/types";
 import IndexNowBanner from "./prs/IndexNowBanner";
+import ReviewProgress from "./prs/ReviewProgress";
 import ReviewCard from "./prs/ReviewCard";
 
 interface ScanResult {
@@ -82,6 +83,8 @@ export default function PrsView({
           repoIndexedAt={repoIndexedAt}
           onIndexComplete={onIndexComplete}
         />
+
+        <ReviewProgress prId={activePR?.id} isScanning={isScanning} />
 
         {activePR && (
           <ReviewCard

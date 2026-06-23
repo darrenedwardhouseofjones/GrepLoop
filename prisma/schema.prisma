@@ -46,6 +46,17 @@ model Repository {
   @@map("repositories")
 }
 
+model ReviewLog {
+  id        String   @id
+  prId      String
+  message   String
+  level     String   // "info" | "warn" | "error" | "tool_call"
+  createdAt DateTime @default(now())
+
+  @@index([prId, createdAt])
+  @@map("review_logs")
+}
+
 model ReviewHistory {
   id            String     @id
   repoId        String
