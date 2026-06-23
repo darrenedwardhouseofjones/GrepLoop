@@ -177,21 +177,21 @@ function PrHeader({
 
         <div className="flex gap-2">
           <button
-            disabled={isScanning || !repoIndexedAt}
+            disabled={isScanning || !repoIndexedAt || activePR?.status === "In Progress"}
             onClick={onTriggerScan}
             title={
               !repoIndexedAt
                 ? "Index the codebase first — reviews without an index produce only diff-only guesses."
-                : isScanning
+                : isScanning || activePR?.status === "In Progress"
                   ? "Review already in progress."
                   : "Run the agentic review loop on this PR"
             }
             className={`px-4 py-2 bg-gradient-to-r from-cyan-500 to-indigo-500 hover:from-cyan-400 hover:to-indigo-400 text-black text-xs font-bold rounded-lg flex items-center gap-1.5 transition-all shadow-md select-none ${
-              isScanning ? "animate-pulse opacity-50" : ""
+              isScanning || activePR?.status === "In Progress" ? "animate-pulse opacity-50" : ""
             } ${!repoIndexedAt ? "opacity-40 cursor-not-allowed grayscale" : "cursor-pointer"}`}
           >
             <Zap size={14} className="fill-black" />
-            <span>{isScanning ? "AI Pipeline Working..." : !repoIndexedAt ? "Index Required" : "Trigger AI Review Scan"}</span>
+            <span>{isScanning || activePR?.status === "In Progress" ? "AI Pipeline Working..." : !repoIndexedAt ? "Index Required" : "Trigger AI Review Scan"}</span>
           </button>
           {hasFindings && (
             <button
