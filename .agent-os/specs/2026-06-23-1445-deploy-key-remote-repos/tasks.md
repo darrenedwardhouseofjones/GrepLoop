@@ -44,6 +44,21 @@ Mark each task `- [x]` when complete. Add follow-up tasks under "Discovered duri
 - [x] **6.3** Added `newRepoMode`, `newCloneUrl`, `newDeployKey`, `newPat`, `newCloneUrlHttps` state to `useDashboardData`. `handleAddRepo` sends `mode` field to API and shows WebhookPrompt for remote repos.
 - [x] **Verify:** Typecheck clean. All 33 tests pass. Dev server starts. Old AddRepoModal.tsx removed.
 
+## Phase 7 — Edit Repo (post-registration edit)
+
+- [ ] **7.1** Extend `PUT /api/repos/[id]` to accept `{ mode, cloneUrl, cloneUrlHttps, deployKey, pat, path }` alongside the existing operational fields. Secrets (`deployKey`, `pat`) encrypted via `crypto.ts`; empty/missing secrets preserve existing ciphertext ("leave blank to keep current"). For `path` edits, persist the new local path. For remote-mode edits, re-enqueue `remoteFetchWorker` if clone URL or secrets changed.
+- [ ] **7.2** Create `src/components/modals/editRepo/` directory mirroring `addRepo/`: `index.tsx` (tabbed parent, prefilled from current repo), `LocalTab.tsx`, `RemoteTab.tsx`, `shared.tsx` (import from `addRepo/shared`), `WebhookPrompt.tsx` (reuse `addRepo/WebhookPrompt` directly). Secret fields render empty with "leave blank to keep current" hint.
+- [ ] **7.3** Add cog-icon edit button per repo row in `src/components/DashboardSidebar.tsx`. Opens EditRepoModal for that repo.
+- [ ] **7.4** Wire `handleEditRepo(repo)` into `src/hooks/useDashboardData.ts`. PUTs to `/api/repos/[id]`, then refreshes repo list. Shows WebhookPrompt only if cloneUrl/mode changed.
+- [ ] **Verify:** Edit a local repo's path → list updates. Edit a remote repo's cloneUrl → re-clone kicks off, `lastFetchAt` updates. Leave secrets blank → existing ciphertext preserved (verify via `SELECT cloneUrl FROM Repository` unchanged). Typecheck clean. All tests pass.
+
+## Phase 8 — Deployment topology detection (localhost vs public URL)
+
+- [ ] **8.1** New `src/lib/publicUrl.ts` — `getPublicUrl(): { url: string; isLocal: boolean }`. Reads `GREPLOOP_PUBLIC_URL` (default `http://localhost:3000`). Sets `isLocal = true` when URL host is `localhost`, `127.0.0.1`, `0.0.0.0`, or `::1`. Empty env → `{ url: "http://localhost:3000", isLocal: true }`.
+- [ ] **8.2** New API endpoint `GET /api/config/public-url` returns `{ url, isLocal }` so the client doesn't need direct env access.
+- [ ] **8.3** Modify `WebhookPrompt.tsx` to fetch `/api/config/public-url` on mount. When `isLocal=true`: show Cloudflare Tunnel setup steps (the `cloudflared tunnel --url http://localhost:3000` command, "set `GREPLOOP_PUBLIC_URL` to the tunnel URL" instruction) above the auto/manual webhook buttons. When `isLocal=false`: skip tunnel steps, show webhook buttons directly.
+- [ ] **Verify:** On localhost (no tunnel env): WebhookPrompt shows tunnel steps. After `GREPLOOP_PUBLIC_URL=https://xyz.trycloudflare.com` set + restart: tunnel steps hidden, webhook buttons only. Typecheck clean. All tests pass.
+
 ## Discovered during work
 
 - 4 crypto tests in `tests/crypto.test.ts` — encrypt/decrypt round-trip, hasMasterKey true/false, wrong tag rejection.

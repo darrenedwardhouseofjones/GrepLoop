@@ -162,6 +162,90 @@ Install-path hint in `src/components/views/llm-config/McpKeysPanel.tsx` already 
 
 ---
 
+## Phase 7 — Edit Repo (post-registration edit)
+
+The Phase 3 registration API only handles *new* repos. Users need to edit existing registrations — to change a local path, swap a deploy key, switch from SSH to PAT, or fix a typo'd clone URL — without deleting and re-registering.
+
+### 7.1 Extend `PUT /api/repos/[id]`
+
+The existing handler at `src/app/api/repos/[id]/route.ts:18-68` accepts operational fields only (`activeBranch`, `status`, `triggerMode`, etc.). Extend the body schema:
+
+```json
+{
+  "mode"?: "local" | "ssh" | "pat",
+  "path"?: "/abs/path",
+  "cloneUrl"?: "git@github.com:…",
+  "cloneUrlHttps"?: "https://…",
+  "deployKey"?: "-----BEGIN…" | "",
+  "pat"?: "github_pat_…" | ""
+}
+```
+
+Behavior:
+- **Mode switch.** If `mode` differs from current `provider`, update `provider` and reset stale secrets of the unused type (e.g. switching `ssh → pat` clears `deployKeyCipher/Iv/Tag`).
+- **Secret preservation.** Empty/missing `deployKey`/`pat` keeps existing ciphertext untouched. Non-empty values call `crypto.encryptSecret()` and overwrite the cipher/iv/tag fields.
+- **Path change.** If `path` is provided and differs from current, persist the new local path.
+- **Re-fetch trigger.** If `mode !== "local"` and either `cloneUrl`, `deployKey`, or `pat` changed, call `remoteFetchWorker.enqueue(id)` so the next clone/fetch picks up the new credential or URL.
+
+Validation: `crypto.hasMasterKey()` must be true if any secret is being written; reject with a clear message otherwise.
+
+### 7.2 `src/components/modals/editRepo/` (new directory)
+
+Mirrors `addRepo/` but opens in edit mode:
+
+- `index.tsx` — tabbed parent. Prefills `mode`, `cloneUrl`, `cloneUrlHttps`, `path` from current repo. Renders LocalTab or RemoteTab based on mode.
+- `LocalTab.tsx` — identical to `addRepo/LocalTab.tsx`; prefilled path.
+- `RemoteTab.tsx` — identical fields to `addRepo/RemoteTab.tsx`; deploy key + PAT textareas are **blank** with a "leave blank to keep current" hint.
+- `shared.tsx` — re-export from `../addRepo/shared` to avoid duplicating the `inputClass` and `Field` components.
+- `WebhookPrompt.tsx` — import directly from `../addRepo/WebhookPrompt`. No new file needed.
+
+File-size rule (≤500 lines) applies — each file should stay well under.
+
+### 7.3 DashboardSidebar cog icon
+
+In `src/components/DashboardSidebar.tsx`, add a small cog (or pencil) icon per repo row. On click, opens `EditRepoModal` with that repo's data prefilled. Coexists with the existing delete button.
+
+### 7.4 `handleEditRepo` wiring
+
+In `src/hooks/useDashboardData.ts`, add `handleEditRepo(repoId, payload)` that PUTs to `/api/repos/[id]` and then refreshes the repo list. Shows `WebhookPrompt` only if `payload.cloneUrl` or `payload.mode` differs from current state (mode/URL change implies webhook may need re-setup; secret rotation alone does not).
+
+---
+
+## Phase 8 — Deployment topology detection (localhost vs public URL)
+
+The user runs GrepLoop on a VPS in some setups ("it's on a VPS, they don't need Cloudflare") and on a local box in others. WebhookPrompt should detect this at runtime rather than forcing a Cloudflare Tunnel step on every user.
+
+### 8.1 `src/lib/publicUrl.ts` (new, ~25 lines)
+
+```typescript
+export function getPublicUrl(): { url: string; isLocal: boolean } {
+  const url = process.env.GREPLOOP_PUBLIC_URL || "http://localhost:3000";
+  const isLocal = /\b(localhost|127\.0\.0\.1|0\.0\.0\.0|::1)\b/.test(url);
+  return { url, isLocal };
+}
+```
+
+Used by both server (webhookSetup reads URL) and the new client API endpoint (below).
+
+### 8.2 `GET /api/config/public-url` (new endpoint)
+
+Returns `{ url, isLocal }`. Client components fetch this on mount to decide whether to render tunnel setup steps.
+
+### 8.3 WebhookPrompt topology branches
+
+In `WebhookPrompt.tsx`, fetch `/api/config/public-url` on mount. Branch:
+
+- **`isLocal === true`** — show a "Tunnel setup" section above the auto/manual webhook buttons:
+  - One-line explanation: GitHub/GitLab can't deliver webhooks to a localhost URL. Use a tunnel.
+  - The `cloudflared tunnel --url http://localhost:3000` command in a copyable code block.
+  - Instruction: copy the tunnel URL, set `GREPLOOP_PUBLIC_URL=https://xyz.trycloudflare.com` in `.env.local`, restart the server, then continue with webhook setup.
+  - A "Continue anyway" button for users who already have a tunnel set up via a different mechanism (ngrok, etc.).
+- **`isLocal === false`** — skip tunnel steps entirely. Go straight to the existing auto/manual webhook buttons.
+
+The user said "if we need it we need it" re: Cloudflare — so we surface it only when actually needed (localhost), and make it easy to skip when not (VPS with public IP).
+
+---
+
 ## GitHub App for local testing
 
 For local webhook auto-create testing we need a real GitHub App (the auto-setup path uses a PAT, but a GitHub App is the cleaner long-term delivery mechanism and the user specifically asked for it).

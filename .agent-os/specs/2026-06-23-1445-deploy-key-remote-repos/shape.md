@@ -14,6 +14,8 @@ This unblocks the "GrepLoop server on office box, repos on GitHub" deployment mo
 - **GitHub App for local testing.** User said "we need the gtuhub app installed locally for testing". Documented setup checklist in `docs/dev-setup.md`. Phase 4.1 ships the simpler PAT path first; App-installation-token support is a follow-up.
 - **`/gloop` command family stays.** No rename to BugHunter; no `/greploop` or `/check-pr` (Greptile namespaces to avoid). This is decided and shipped — this spec doesn't touch it.
 - **Path field becomes optional.** `Repository.path String? @unique` keeps local repos working (they still set `path`) while letting remote repos use `localPath` (server-managed clone directory) instead.
+- **Edit-repo is a Phase 7 addition, not Phase 3.** User pointed out after the original spec landed that the edit-repo flow ("how do I edit a project to put the repo and deploy key") was missing. Phase 7 mirrors the registration flow (Phase 3+4) but operates on `PUT /api/repos/[id]` with secret-preservation semantics ("leave blank to keep current") so users can rotate keys or switch SSH↔PAT without re-cloning.
+- **Deployment topology: support both, detect at runtime.** User said "it's on a VPS, they don't need Cloudflare which I want to avoid, but if we need it we need it." Phase 8 introduces `getPublicUrl()` returning `{ url, isLocal }` — WebhookPrompt shows Cloudflare Tunnel setup steps only when `isLocal` is true (localhost / 127.0.0.1 / 0.0.0.0). VPS users with a public URL skip the tunnel steps entirely. The user explicitly chose "Support both (detect at runtime)" over tunnel-always or tunnel-never.
 
 ## Context
 
