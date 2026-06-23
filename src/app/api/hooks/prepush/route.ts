@@ -30,6 +30,17 @@ export async function POST(req: Request) {
       );
     }
 
+    if (!repo.indexedAt) {
+      return NextResponse.json(
+        {
+          passed: false,
+          error: "INDEX_REQUIRED",
+          message: `Project "${repo.name}" has not been indexed. Run \`npm run dev\`, open the dashboard, and click "Index Now" before pushing.`,
+        },
+        { status: 409 },
+      );
+    }
+
     const pr = await prisma.pullRequest.findFirst({
       where: { repoId: repo.id, sourceBranch: branch },
       orderBy: { createdAt: "desc" },

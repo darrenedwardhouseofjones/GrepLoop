@@ -141,8 +141,12 @@ async function handlePrCheck(args: any): Promise<string> {
 
   if (isReviewActive(pr.id)) return `> Review already in progress for **${pr.sourceBranch}**. Check results with \`prcheckstatus ${pr.sourceBranch}\` or view in dashboard.`;
 
+  const repo = await prisma.repository.findUnique({ where: { id: pr.repoId } });
+  if (!repo?.indexedAt) {
+    return `> ⚠ **Index required.** Project \`${repo?.name ?? pr.repoId}\` has not been indexed yet — reviews without an index produce diff-only guesses.\n>\n> Index it first via the dashboard (\`Codebase AST graph\` tab → \`Index Now\`) or \`POST /api/repos/${pr.repoId}/index\`, then retry \`prcheck\`.`;
+  }
+
   try {
-    const repo = await prisma.repository.findUnique({ where: { id: pr.repoId } });
     if (repo) {
       await refreshPrFiles(repo.path, repo.baseBranch, pr.sourceBranch, pr.id);
     }
@@ -289,6 +293,16 @@ async function handleLegacyCommand(body: any, defRepo: string | null) {
       if (isReviewActive(pr.id)) {
         return NextResponse.json({
           status: "Accepted", message: `> Review already in progress for **${pr.sourceBranch}**. Poll with prcheckstatus.`,
+        });
+      }
+      const repo = await prisma.repository.findUnique({
+        where: { id: pr.repoId },
+        select: { indexedAt: true, name: true },
+      });
+      if (!repo?.indexedAt) {
+        return NextResponse.json({
+          status: "Error",
+          message: `> ⚠ **Index required.** Project \`${repo?.name ?? pr.repoId}\` has not been indexed yet. Index it via the dashboard or \`POST /api/repos/${pr.repoId}/index\`, then retry prcheck.`,
         });
       }
       activeReviews.set(pr.id, Date.now());

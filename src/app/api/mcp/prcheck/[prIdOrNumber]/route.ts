@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { prisma } from "@/src/lib/prisma";
 import { findPrByIdOrNumber } from "@/src/lib/findPr";
 import { runPrScan } from "@/reviewService";
 import { authenticateApiRequest } from "@/src/lib/apiAuth";
@@ -17,6 +18,17 @@ export async function GET(req: Request, { params }: { params: Promise<{ prIdOrNu
         status: "Error",
         message: `Pull request reference "${prIdOrNumber}" could not be matched in the database.`
       }, { status: 404 });
+    }
+
+    const repo = await prisma.repository.findUnique({
+      where: { id: pr.repoId },
+      select: { indexedAt: true, name: true },
+    });
+    if (!repo?.indexedAt) {
+      return NextResponse.json({
+        status: "Error",
+        message: `Project "${repo?.name ?? pr.repoId}" has not been indexed. Index it first via the dashboard or the /api/repos/{id}/index endpoint, then retry prcheck.`,
+      }, { status: 409 });
     }
 
     const scanResult = await runPrScan(pr.id);
