@@ -44,11 +44,12 @@ export async function POST(req: Request, { params }: { params: Promise<{ prId: s
 
     const repoPath = repo.path;
     const baseBranch = pr.targetBranch || repo.baseBranch || "main";
+    let files: any[] = [];
     if (repoPath && pr.sourceBranch) {
-      await refreshPrFiles(repoPath, baseBranch, pr.sourceBranch, prId);
+      files = await refreshPrFiles(repoPath, baseBranch, pr.sourceBranch, prId);
     }
 
-    const result = await runPrScan(prId);
+    const result = await runPrScan(prId, files);
 
     return NextResponse.json(result);
   } catch (err: any) {

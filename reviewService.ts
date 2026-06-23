@@ -199,18 +199,22 @@ Do not sugarcoat. Do not soften the blow. If the code is bad, say so. If it's cl
  * takes a backend-option parameter. Falls through to procedural findings
  * when the LLM is unconfigured or fails — UI surfaces this via systemWarn.
  */
-export async function runPrScan(prId: string): Promise<ScanResult> {
+export async function runPrScan(prId: string, preloadedFiles?: any[]): Promise<ScanResult> {
   // 1. Fetch Pull Request details
   const pr = await prisma.pullRequest.findUnique({ where: { id: prId } });
   if (!pr) {
     throw new Error(`Pull Request with ID "${prId}" was not found.`);
   }
 
-  // 2. Fetch modified files and diff content
-  const files = await prisma.prFile.findMany({
-    where: { prId },
-    select: { filename: true, status: true, additions: true, deletions: true, originalContent: true, modifiedContent: true, diff: true },
-  });
+  // 2. Fetch modified files and diff content (use preloaded if provided,
+  //    otherwise read from DB — the latter can race with background
+  //    getRealLocalPrs() deleting/recreating rows).
+  const files = preloadedFiles?.length
+    ? preloadedFiles
+    : await prisma.prFile.findMany({
+      where: { prId },
+      select: { filename: true, status: true, additions: true, deletions: true, originalContent: true, modifiedContent: true, diff: true },
+    });
   if (files.length === 0) {
     await prisma.pullRequest.updateMany({ where: { id: prId }, data: { status: "Failed" } });
     throw new Error("No modified files or diffs found in this Pull Request to scan.");

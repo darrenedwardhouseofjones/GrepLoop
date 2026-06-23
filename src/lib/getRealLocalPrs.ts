@@ -246,6 +246,7 @@ export async function refreshPrFiles(repoPath: string, baseBranch: string, branc
       })),
     });
   }
+  return files;
 }
 
 function collectBranchFiles(
