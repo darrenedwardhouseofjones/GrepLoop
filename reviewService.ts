@@ -283,9 +283,11 @@ ${diffPayload}`;
         ];
 
         let loopCount = 0;
+        let lastHadToolCalls = false;
 
         while (loopCount < 8 && !finalReview) {
           loopCount++;
+          console.log(`[review] iteration ${loopCount}/8 provider=${name}`);
           const response = await client.chat.completions.create({
             model,
             messages,
@@ -297,6 +299,7 @@ ${diffPayload}`;
           const msg = response.choices?.[0]?.message;
           if (!msg) break;
           messages.push(msg);
+          lastHadToolCalls = Boolean(msg.tool_calls && msg.tool_calls.length > 0);
 
           if (msg.tool_calls && msg.tool_calls.length > 0) {
             for (const call of msg.tool_calls) {
@@ -307,11 +310,15 @@ ${diffPayload}`;
               const fnArgs = call.function?.arguments ? JSON.parse(call.function.arguments) : {};
 
               if (fnName === "submitReview") {
+                console.log(
+                  `[review] submitReview received: rating=${fnArgs.rating} findings=${fnArgs.findings?.length ?? 0} provider=${name}`,
+                );
                 finalReview = fnArgs;
                 break;
               }
 
               let toolResult = "No results.";
+              let resultSummary = "no results";
               try {
                 if (fnName === "searchCodebase") {
                   const items = await prisma.symbol.findMany({
@@ -319,19 +326,30 @@ ${diffPayload}`;
                     take: 10,
                     select: { id: true, name: true, kind: true, filePath: true, lineStart: true, lineEnd: true, summary: true },
                   });
-                  if (items && items.length > 0) toolResult = JSON.stringify(items);
+                  if (items && items.length > 0) {
+                    toolResult = JSON.stringify(items);
+                    resultSummary = `${items.length} results`;
+                  }
                 } else if (fnName === "getCallers") {
                   const edges = await prisma.edge.findMany({ where: { repoId: pr.repoId, toId: fnArgs.symbolId } });
-                  if (edges && edges.length > 0) toolResult = JSON.stringify(edges);
+                  if (edges && edges.length > 0) {
+                    toolResult = JSON.stringify(edges);
+                    resultSummary = `${edges.length} results`;
+                  }
                 } else if (fnName === "findSimilar") {
                   const { IndexingService: idxSvc } = await import("./src/services/indexingService");
                   const scored = await idxSvc.semanticSearch(pr.repoId, fnArgs.query, 5);
-                  if (scored && scored.length > 0) toolResult = JSON.stringify(scored);
+                  if (scored && scored.length > 0) {
+                    toolResult = JSON.stringify(scored);
+                    resultSummary = `${scored.length} results`;
+                  }
                 }
               } catch (e) {
                 console.error(`Tool ${fnName} failed:`, e);
+                resultSummary = `error: ${(e as any)?.message || String(e)}`;
                 toolResult = `Tool error: ${(e as any)?.message || String(e)}`;
               }
+              console.log(`[review] tool ${fnName} → ${resultSummary}`);
 
               messages.push({
                 role: "tool",
@@ -352,6 +370,9 @@ ${diffPayload}`;
                 .trim();
               const parsed = JSON.parse(cleanJson);
               if (parsed.rating && parsed.findings) {
+                console.log(
+                  `[review] parsed JSON finalReview without submitReview: rating=${parsed.rating} findings=${parsed.findings.length} provider=${name}`,
+                );
                 finalReview = parsed;
               }
             } catch {
@@ -359,6 +380,12 @@ ${diffPayload}`;
             }
             break;
           }
+        }
+
+        if (!finalReview) {
+          console.log(
+            `[review] loop exited without submitReview (iterations used: ${loopCount}, last message had tool_calls: ${lastHadToolCalls}) provider=${name}`,
+          );
         }
 
         if (finalReview) {

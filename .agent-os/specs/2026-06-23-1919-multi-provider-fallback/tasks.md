@@ -50,10 +50,13 @@ Mark each `- [ ]` as `- [x]` when complete. Per user convention: update this fil
 
 ## Phase 5 — Agentic loop logging
 
-- [ ] Log `[review] iteration ${loopCount}/8 provider=${name}` at top of each iteration.
-- [ ] Log `[review] tool ${fnName} → ${resultSummary}` after each tool call (where resultSummary is "N results" or "error: ...").
-- [ ] Log `[review] submitReview received: rating=${...} findings=${...}` when submitReview fires.
-- [ ] Log `[review] loop exited without submitReview (iterations used: ${loopCount}, last message had tool_calls: ${!!msg.tool_calls?.length})` when finalReview stays null.
+- [x] Log `[review] iteration ${loopCount}/8 provider=${name}` at top of each iteration.
+- [x] Log `[review] tool ${fnName} → ${resultSummary}` after each tool call (where resultSummary is "N results" or "error: ...").
+- [x] Log `[review] submitReview received: rating=${...} findings=${...}` when submitReview fires.
+- [x] Log `[review] loop exited without submitReview (iterations used: ${loopCount}, last message had tool_calls: ${...})` when finalReview stays null.
+- [x] Bonus: log when text-path JSON is parsed as finalReview.
+- [x] `npm run lint` clean.
+- [x] `npm test` — all 33 tests pass.
 
 ## Phase 6 — Legacy command handler: route prcheckstatus
 
