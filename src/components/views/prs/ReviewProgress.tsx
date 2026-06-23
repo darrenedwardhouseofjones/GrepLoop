@@ -41,6 +41,8 @@ export default function ReviewProgress({ prId, isScanning }: Props) {
       return;
     }
 
+    setLogs([]);
+
     const poll = async () => {
       try {
         const res = await fetch(`/api/reviews/log?prId=${prId}`);

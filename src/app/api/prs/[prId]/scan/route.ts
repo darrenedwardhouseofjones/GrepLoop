@@ -41,6 +41,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ prId: s
     }
 
     await prisma.pullRequest.updateMany({ where: { id: prId }, data: { status: 'In Progress' } });
+    await prisma.reviewLog.deleteMany({ where: { prId } });
 
     const repoPath = repo.path;
     const baseBranch = pr.targetBranch || repo.baseBranch || "main";

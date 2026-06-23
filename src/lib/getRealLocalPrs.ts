@@ -143,6 +143,7 @@ export async function getRealLocalPrs(repoPath: string, repoId: string) {
         // a dev tool: the next poll cycle repairs any partial state.
         await prisma.prFile.deleteMany({ where: { prId } });
         await prisma.prFile.createMany({
+          skipDuplicates: true,
           data: filesList.map((file, i) => ({
             id: `file-${prId}-${i}`,
             prId,
@@ -233,6 +234,7 @@ export async function refreshPrFiles(repoPath: string, baseBranch: string, branc
   await prisma.prFile.deleteMany({ where: { prId } });
   if (files.length > 0) {
     await prisma.prFile.createMany({
+      skipDuplicates: true,
       data: files.map((f) => ({
         id: randomUUID(),
         prId,
