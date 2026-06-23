@@ -57,7 +57,7 @@ export default function DbConfigView({
         <div className="absolute top-0 right-0 w-48 h-48 bg-cyan-500/[0.02] rounded-full blur-3xl pointer-events-none" />
 
         <div className="flex items-center gap-3 mb-4">
-          <div className="p-2 bg-cyan-500/10 text-cyan-405 rounded-lg">
+          <div className="p-2 bg-cyan-500/10 text-cyan-400 rounded-lg">
             <Database size={20} />
           </div>
           <div>

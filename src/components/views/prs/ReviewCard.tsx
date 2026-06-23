@@ -218,7 +218,7 @@ export default function ReviewCard({ activePR, findings, onCopySuggestion, copyF
 
                         {finding.diffSuggestion && (
                           <div className="mt-2 relative">
-                            <div className="bg-black/50 rounded-lg p-3 font-mono text-xs text-slate-300 border border-white/5 overflow-y-auto max-h-40 whitespace-pre">
+                            <div className="bg-black/50 rounded-lg p-3 font-mono text-xs text-slate-300 border border-white/5 overflow-y-auto overflow-x-auto max-h-40 whitespace-pre">
                               <div className="text-slate-600 text-[10px] font-semibold border-b border-white/5 pb-1 mb-2 uppercase tracking-wide flex items-center justify-between">
                                 <span>Suggested Fix</span>
                                 <button

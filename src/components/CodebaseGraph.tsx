@@ -314,7 +314,7 @@ export default function CodebaseGraph({ repoId, repoName, onIndexComplete }: Cod
                       <div className="flex items-center gap-1.5">
                         <span className="font-bold truncate text-[13px]">{sym.name}</span>
                         <span className={`text-[8px] px-1 py-0.2 rounded font-extrabold uppercase font-mono tracking-wider ${
-                          sym.kind === 'class' ? 'bg-indigo-500/20 text-indigo-305' : 'bg-cyan-500/20 text-cyan-305'
+                          sym.kind === 'class' ? 'bg-indigo-500/20 text-indigo-400' : 'bg-cyan-500/20 text-cyan-400'
                         }`}>
                           {sym.kind}
                         </span>
@@ -383,7 +383,7 @@ export default function CodebaseGraph({ repoId, repoName, onIndexComplete }: Cod
                   
                   {/* Left block (Callers) */}
                   <div className="flex-1 w-full flex flex-col gap-1.5">
-                    <div className="text-[9px] text-center text-indigo-405 font-bold uppercase mb-1 flex items-center justify-center gap-1">
+                    <div className="text-[9px] text-center text-indigo-400 font-bold uppercase mb-1 flex items-center justify-center gap-1">
                       <span className="w-1 h-1 rounded-full bg-indigo-505" />
                       <span>Incoming Callers ({callers.length})</span>
                     </div>
@@ -415,13 +415,13 @@ export default function CodebaseGraph({ repoId, repoName, onIndexComplete }: Cod
                   <div className="flex md:flex-col items-center justify-center shrink-0 py-2">
                     <div className="w-4 h-px md:w-px md:h-8 bg-slate-800" />
                     <div className="w-6 h-6 rounded-full bg-[#0B0E14] border border-cyan-500/20 flex items-center justify-center animate-pulse">
-                      <ArrowRight size={11} className="text-cyan-405 transform md:rotate-0 rotate-90" />
+                      <ArrowRight size={11} className="text-cyan-400 transform md:rotate-0 rotate-90" />
                     </div>
                     <div className="w-4 h-px md:w-px md:h-8 bg-slate-800" />
                   </div>
 
                   {/* Middle node (Focus) */}
-                  <div className="p-2.5 bg-cyan-550/10 border-2 border-cyan-500 text-cyan-305 w-full md:w-36 rounded-xl font-bold text-center truncate text-[11px] shadow-[0_0_12px_rgba(6,182,212,0.15)] flex flex-col justify-center items-center">
+                  <div className="p-2.5 bg-cyan-550/10 border-2 border-cyan-500 text-cyan-400 w-full md:w-36 rounded-xl font-bold text-center truncate text-[11px] shadow-[0_0_12px_rgba(6,182,212,0.15)] flex flex-col justify-center items-center">
                     <span className="truncate">{selectedSymbol.name}</span>
                     <span className="text-[7px] text-cyan-500 uppercase leading-none font-bold mt-1 tracking-wider">Focus Target</span>
                   </div>
@@ -430,14 +430,14 @@ export default function CodebaseGraph({ repoId, repoName, onIndexComplete }: Cod
                   <div className="flex md:flex-col items-center justify-center shrink-0 py-2">
                     <div className="w-4 h-px md:w-px md:h-8 bg-slate-800" />
                     <div className="w-6 h-6 rounded-full bg-[#0B0E14] border border-cyan-500/20 flex items-center justify-center animate-pulse">
-                      <ArrowRight size={11} className="text-cyan-405 transform md:rotate-0 rotate-90" />
+                      <ArrowRight size={11} className="text-cyan-400 transform md:rotate-0 rotate-90" />
                     </div>
                     <div className="w-4 h-px md:w-px md:h-8 bg-slate-800" />
                   </div>
 
                   {/* Right block (Callees) */}
                   <div className="flex-1 w-full flex flex-col gap-1.5">
-                    <div className="text-[9px] text-center text-teal-405 font-bold uppercase mb-1 flex items-center justify-center gap-1">
+                    <div className="text-[9px] text-center text-teal-400 font-bold uppercase mb-1 flex items-center justify-center gap-1">
                       <span className="w-1 h-1 rounded-full bg-teal-505" />
                       <span>Outgoing Callees ({callees.length})</span>
                     </div>
@@ -475,7 +475,7 @@ export default function CodebaseGraph({ repoId, repoName, onIndexComplete }: Cod
               {/* Multi-Hop evidence trace path log */}
               <div className="bg-[#0A0D13] border border-white/5 p-4 rounded-xl space-y-3 font-mono">
                 <div className="text-xs font-bold uppercase tracking-wider text-white flex items-center gap-1.5 border-b border-white/5 pb-2">
-                  <Info size={13} className="text-cyan-402 shrink-0" />
+                  <Info size={13} className="text-cyan-400 shrink-0" />
                   <span>Call Graph Investigation Log</span>
                 </div>
 
@@ -486,7 +486,7 @@ export default function CodebaseGraph({ repoId, repoName, onIndexComplete }: Cod
                   
                   {callers.length > 0 ? (
                     <div className="space-y-1.5">
-                      <div className="text-[10px] text-slate-520 uppercase tracking-widest font-extrabold">Detected Incoming Paths:</div>
+                      <div className="text-[10px] text-slate-500 uppercase tracking-widest font-extrabold">Detected Incoming Paths:</div>
                       {callers.map((c, i) => {
                         const fromSym = symbols.find(s => s.id === c.source);
                         return (
@@ -507,7 +507,7 @@ export default function CodebaseGraph({ repoId, repoName, onIndexComplete }: Cod
 
                   {callees.length > 0 && (
                     <div className="space-y-1.5 mt-2">
-                      <div className="text-[10px] text-slate-520 uppercase tracking-widest font-extrabold">Directed Outgoing Dependencies:</div>
+                      <div className="text-[10px] text-slate-500 uppercase tracking-widest font-extrabold">Directed Outgoing Dependencies:</div>
                       {callees.map((c, i) => {
                         const toSym = symbols.find(s => s.id === c.target);
                         return (

@@ -126,7 +126,7 @@ export default function App() {
         />
 
         {/* Content Body Viewport */}
-        <section className="flex-1 flex flex-col bg-[#0B0E14] overflow-hidden">
+        <section className="flex-1 flex flex-col bg-[#0B0E14] overflow-hidden min-h-0">
           {/* Main Title Metadata Row */}
           <div className="p-4 sm:p-5 border-b border-white/5 flex flex-col sm:flex-row sm:items-end justify-between gap-4 bg-[#0F1219]/30">
             <div>
@@ -221,7 +221,7 @@ export default function App() {
           </div>
 
           {/* Core Content Switching Frame */}
-          <div className="flex-1 overflow-hidden p-4 sm:p-5 flex flex-col space-y-4">
+          <div className="flex-1 overflow-hidden p-4 sm:p-5 flex flex-col space-y-4 min-h-0">
             <AnimatePresence mode="wait">
               {activeTab === "db_config" && (
                 <DbConfigView

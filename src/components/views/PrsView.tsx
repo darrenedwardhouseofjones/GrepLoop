@@ -70,7 +70,7 @@ export default function PrsView({
       transition={{ duration: 0.1 }}
       className="flex-1 flex flex-col xl:flex-row gap-5 overflow-hidden min-h-0"
     >
-      <div className="flex-1 flex flex-col space-y-4 overflow-y-auto min-w-0 pr-1">
+      <div className="flex-1 flex flex-col space-y-4 overflow-y-auto overflow-x-hidden min-w-0 pr-1">
         <PrHeader
           activePR={activePR}
           isScanning={isScanning}
@@ -134,7 +134,7 @@ function PrHeader({
       <div className="h-64 flex flex-col items-center justify-center border border-white/10 border-dashed rounded-xl bg-slate-900/10 p-6 text-slate-500">
         <GitBranch size={32} className="text-slate-700 animate-pulse mb-2" />
         <p className="text-sm font-semibold font-mono">No Active Branch / PR selected</p>
-        <p className="text-xs text-slate-650 font-mono max-w-sm text-center mt-1">
+        <p className="text-xs text-slate-500 font-mono max-w-sm text-center mt-1">
           Select a workspace target from the sidebar menu to populate git branches and start AI security code audits.
         </p>
       </div>
@@ -148,7 +148,7 @@ function PrHeader({
       <div className="flex items-start justify-between gap-4 flex-wrap">
         <div className="space-y-1">
           <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-[10px] font-mono uppercase bg-slate-800 text-slate-450 px-2 py-0.5 rounded font-bold border border-slate-750">
+            <span className="text-[10px] font-mono uppercase bg-slate-800 text-slate-400 px-2 py-0.5 rounded font-bold border border-slate-750">
               Active Pull Request View
             </span>
             <span
@@ -247,7 +247,7 @@ function PrHeader({
         <div className="flex items-center gap-1.5">
           <Calendar size={12} className="text-slate-600" />
           <span>
-            Detected: <strong className="text-slate-305 font-semibold">{new Date(activePR.createdAt).toLocaleDateString()}</strong>
+            Detected: <strong className="text-slate-300 font-semibold">{new Date(activePR.createdAt).toLocaleDateString()}</strong>
           </span>
         </div>
       </div>
@@ -339,7 +339,7 @@ function DiffView({ file }: { file: PRFile }) {
         const cls = isAddition
           ? "bg-emerald-500/10 text-emerald-300 border-l-2 border-emerald-500 font-bold"
           : isDeletion
-          ? "bg-rose-500/10 text-rose-350 border-l-2 border-rose-500 line-through"
+          ? "bg-rose-500/10 text-rose-400 border-l-2 border-rose-500 line-through"
           : isHeader
           ? "text-cyan-500 font-bold tracking-tight border-b border-cyan-500/5 my-1 bg-cyan-950/10"
           : "text-slate-400";

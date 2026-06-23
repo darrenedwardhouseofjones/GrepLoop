@@ -345,7 +345,7 @@ function PrRow({ pr, isPrSelected, onSelect }: { pr: PullRequest; isPrSelected: 
         <GitBranch size={10} />
       </div>
       <div className="flex-1 min-w-0 font-mono">
-        <div className="text-[11px] font-bold truncate text-slate-205">{pr.title}</div>
+        <div className="text-[11px] font-bold truncate text-slate-300">{pr.title}</div>
         <div className="flex items-center justify-between mt-0.5 text-[9px] text-slate-500">
           <span className="truncate max-w-[90px] text-cyan-400 font-semibold">{pr.sourceBranch}</span>
           <div className="flex items-center gap-1 shrink-0">
