@@ -69,17 +69,16 @@ All MCP API endpoints (`/api/mcp/*`, `/api/hooks/prepush`) require an API key vi
 
 ## Agent skill
 
-### Agent skills
+One skill ships with the repo:
 
-Two skills ship with the repo:
+- **`skills/gloop/SKILL.md`** — `/gloop` command family. Reviews PRs through the GrepLoop engine and reports findings with confidence scores. Rating 1-5; 4-5 is production-grade.
+  - `/gloop` — list PRs for the current repo with ratings
+  - `/gloop <number>` — review a specific PR
+  - `/gloop status <number>` — show existing review results without re-scanning
+  - `/gloop fix <number>` — auto-fix loop: review → fix → re-review until 4/5
+  - `/gloop fix <number> --once` — single-pass fix, no loop
 
-- **`skills/bughunter/SKILL.md`** — `/bughunter` command. Reviews PRs via MCP and reports findings with confidence scores. Rating 1-5; 4-5 is production-grade.
-  - `/bughunter` or `/bughunter review [number]` — review current branch (auto-detects PR from git branch)
-  - `/bughunter status` — show existing review results
-
-- **`skills/bugfixer/SKILL.md`** — `/bugfixer` command. Auto-fix loop: review → fix → re-review until 4/5.
-  - `/bugfixer` — full loop
-  - `/bugfixer once` — single pass fixes
+Install to your user skills dir: `cp -r skills/gloop ~/.claude/skills/`. Remove any prior `~/.claude/skills/bughunter` and `~/.claude/skills/bugfixer` first — those are the old names and are no longer shipped.
 
 ## Database
 

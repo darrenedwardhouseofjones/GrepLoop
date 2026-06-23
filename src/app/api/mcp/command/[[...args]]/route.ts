@@ -81,6 +81,15 @@ async function resolvePrFromArgs(args: any): Promise<any | null> {
   let pr = args.number ? await findPrByIdOrNumber(args.number) : null;
   if (pr && args.repoId && pr.repoId !== args.repoId) pr = null;
   if (!pr && args.repoId && args.branch) pr = await findPrByBranch(args.repoId, args.branch);
+  if (!pr && args.number && /^\d+$/.test(String(args.number)) && args.repoId) {
+    const ordinal = await prisma.pullRequest.findMany({
+      where: { repoId: args.repoId },
+      orderBy: { createdAt: "asc" },
+      skip: parseInt(String(args.number), 10) - 1,
+      take: 1,
+    });
+    if (ordinal.length > 0) pr = ordinal[0];
+  }
   return pr;
 }
 

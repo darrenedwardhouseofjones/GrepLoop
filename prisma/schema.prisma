@@ -13,6 +13,7 @@ model Repository {
   id                 String          @id
   name               String
   path               String          @unique
+
   baseBranch         String
   activeBranch       String
   triggerMode        String

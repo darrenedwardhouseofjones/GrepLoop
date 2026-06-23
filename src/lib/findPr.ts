@@ -15,6 +15,13 @@ export async function findPrByIdOrNumber(param: string): Promise<any | null> {
       where: { id: { endsWith: `-${normalized}` } },
     });
     if (list.length > 0) return list[0];
+
+    const ordinal = await prisma.pullRequest.findMany({
+      orderBy: { createdAt: "asc" },
+      skip: parseInt(normalized, 10) - 1,
+      take: 1,
+    });
+    if (ordinal.length > 0) return ordinal[0];
   }
 
   const fallback = await prisma.pullRequest.findFirst({
