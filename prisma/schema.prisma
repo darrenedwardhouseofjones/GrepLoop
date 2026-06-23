@@ -10,9 +10,23 @@ datasource db {
 }
 
 model Repository {
-  id                 String          @id
-  name               String
-  path               String          @unique
+  id              String          @id
+  name            String
+  path            String?         @unique
+
+  provider        String? // "local" | "github" | "gitlab"
+  cloneUrl        String? // git@github.com:... or https://...
+  cloneUrlHttps   String? // HTTPS URL for API calls (when cloneUrl is SSH)
+  deployKeyCipher String?
+  deployKeyIv     String?
+  deployKeyTag    String?
+  patCipher       String?
+  patIv           String?
+  patTag          String?
+  webhookSecret   String? // HMAC secret (plaintext — needed to verify inbound webhooks)
+  webhookId       String?
+  lastFetchAt     DateTime?
+  localPath       String? // server-managed clone directory
 
   baseBranch         String
   activeBranch       String

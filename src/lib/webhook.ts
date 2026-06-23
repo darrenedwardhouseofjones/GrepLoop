@@ -14,6 +14,15 @@ export function verifyGithubSignature(payload: string, signature: string, secret
   }
 }
 
+export function verifyGitlabToken(token: string, secret: string): boolean {
+  if (!token || !secret) return false;
+  try {
+    return timingSafeEqual(Buffer.from(token), Buffer.from(secret));
+  } catch {
+    return false;
+  }
+}
+
 export function getRepoRemoteUrl(repoPath: string): string {
   try {
     return execSync(`git -C "${repoPath}" remote get-url origin`, {
@@ -25,16 +34,26 @@ export function getRepoRemoteUrl(repoPath: string): string {
   }
 }
 
-export async function findRepoByCloneUrl(cloneUrl: string): Promise<{ id: string; path: string } | null> {
-  const repos = await prisma.repository.findMany({ select: { id: true, path: true } });
+export async function findRepoByCloneUrl(cloneUrl: string): Promise<{ id: string; localPath: string | null; webhookSecret: string | null } | null> {
+  const repos = await prisma.repository.findMany({
+    select: { id: true, path: true, localPath: true, cloneUrl: true, webhookSecret: true },
+  });
   const normalizedClone = cloneUrl.replace(/\.git$/, "");
+
   for (const repo of repos) {
+    if (repo.cloneUrl) {
+      if (repo.cloneUrl === cloneUrl || repo.cloneUrl.replace(/\.git$/, "") === normalizedClone) {
+        return { id: repo.id, localPath: repo.localPath || repo.path, webhookSecret: repo.webhookSecret };
+      }
+      continue;
+    }
+    if (!repo.path) continue;
     const remoteUrl = getRepoRemoteUrl(repo.path);
     if (!remoteUrl) continue;
-    if (remoteUrl === cloneUrl) return repo;
-    if (remoteUrl.replace(/\.git$/, "") === normalizedClone) return repo;
+    if (remoteUrl === cloneUrl) return { id: repo.id, localPath: repo.path, webhookSecret: repo.webhookSecret };
+    if (remoteUrl.replace(/\.git$/, "") === normalizedClone) return { id: repo.id, localPath: repo.path, webhookSecret: repo.webhookSecret };
     const sshToHttps = remoteUrl.replace(/^git@[^:]+:/, "https://github.com/").replace(/\.git$/, "");
-    if (sshToHttps === normalizedClone) return repo;
+    if (sshToHttps === normalizedClone) return { id: repo.id, localPath: repo.path, webhookSecret: repo.webhookSecret };
   }
   return null;
 }

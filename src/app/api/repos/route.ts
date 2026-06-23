@@ -1,6 +1,10 @@
+import crypto from "node:crypto";
 import { NextResponse } from "next/server";
 import { prisma } from "@/src/lib/prisma";
 import { getRealLocalPrs } from "@/src/lib/getRealLocalPrs";
+import { encryptSecret, hasMasterKey } from "@/src/lib/crypto";
+import { enqueue } from "@/src/services/remoteFetchWorker";
+import { getProviderFromUrl } from "@/src/lib/webhookSetup";
 
 export async function GET() {
   try {
@@ -18,78 +22,159 @@ export async function GET() {
 export async function POST(req: Request) {
   try {
     const body = await req.json();
-    const { id, name, path: repoPath, baseBranch, activeBranch, triggerMode, quietPeriodSeconds, branchPattern } = body;
+    const {
+      id, name, path: repoPath,
+      baseBranch, activeBranch, triggerMode, quietPeriodSeconds, branchPattern,
+      mode = "local",
+      cloneUrl, cloneUrlHttps, deployKey, pat,
+    } = body;
 
-    if (!repoPath || typeof repoPath !== "string") {
-      return NextResponse.json(
-        { error: "Path is required." },
-        { status: 400 },
-      );
+    if (!name || typeof name !== "string") {
+      return NextResponse.json({ error: "Name is required." }, { status: 400 });
     }
 
-    // Pre-check for an existing link at this path. The DB also has a unique
-    // constraint on `path` (defense in depth against races), but this lets us
-    // return a friendly "already linked as X" message instead of a generic
-    // constraint-violation error.
-    const existing = await prisma.repository.findFirst({
-      where: { path: repoPath },
-      select: { id: true, name: true },
-    });
-    if (existing) {
+    if (mode === "local") {
+      if (!repoPath || typeof repoPath !== "string") {
+        return NextResponse.json({ error: "Path is required for local repos." }, { status: 400 });
+      }
+
+      const existing = await prisma.repository.findFirst({
+        where: { path: repoPath },
+        select: { id: true, name: true },
+      });
+      if (existing) {
+        return NextResponse.json(
+          {
+            error: `Directory "${repoPath}" is already linked as project "${existing.name}".`,
+            existingId: existing.id,
+            existingName: existing.name,
+          },
+          { status: 409 },
+        );
+      }
+
+      const cleanId = id || name.toLowerCase().replace(/[^a-z0-9]/g, "-") + "-" + Date.now();
+
+      try {
+        await prisma.repository.create({
+          data: {
+            id: cleanId,
+            name,
+            path: repoPath,
+            provider: "local",
+            baseBranch: baseBranch || "main",
+            activeBranch: activeBranch || baseBranch || "main",
+            triggerMode: triggerMode || "auto",
+            quietPeriodSeconds: quietPeriodSeconds || 10,
+            branchPattern: branchPattern || "*",
+            status: "idle",
+            lastCommitHash: "a1b2c3d",
+            lastCommitMessage: "initial repository watch link",
+            lastActivityTime: new Date().toISOString(),
+            stabilizationTimer: 0,
+            reviewsCount: 0,
+          },
+        });
+      } catch (createErr: any) {
+        if (createErr?.code === "P2002") {
+          const racer = await prisma.repository.findFirst({
+            where: { path: repoPath },
+            select: { id: true, name: true },
+          });
+          return NextResponse.json(
+            {
+              error: `Directory "${repoPath}" was just linked as project "${racer?.name || "unknown"}" — duplicate prevented.`,
+              existingId: racer?.id,
+              existingName: racer?.name,
+            },
+            { status: 409 },
+          );
+        }
+        throw createErr;
+      }
+
+      await getRealLocalPrs(repoPath, cleanId);
+      return NextResponse.json({ success: true, id: cleanId }, { status: 201 });
+    }
+
+    // --- Remote repo (ssh or pat) ---
+    if (!cloneUrl || typeof cloneUrl !== "string") {
+      return NextResponse.json({ error: "cloneUrl is required for remote repos." }, { status: 400 });
+    }
+
+    if (mode === "ssh" && (!deployKey || typeof deployKey !== "string")) {
+      return NextResponse.json({ error: "deployKey is required for SSH mode." }, { status: 400 });
+    }
+
+    if (mode === "pat" && (!pat || typeof pat !== "string")) {
+      return NextResponse.json({ error: "PAT is required for PAT mode." }, { status: 400 });
+    }
+
+    if (!hasMasterKey()) {
       return NextResponse.json(
-        {
-          error: `Directory "${repoPath}" is already linked as project "${existing.name}". Each directory can only be linked once.`,
-          existingId: existing.id,
-          existingName: existing.name,
-        },
-        { status: 409 },
+        { error: "GREPLOOP_MASTER_KEY is not set. Remote repo secrets cannot be encrypted." },
+        { status: 500 },
       );
     }
 
     const cleanId = id || name.toLowerCase().replace(/[^a-z0-9]/g, "-") + "-" + Date.now();
+    const provider = getProviderFromUrl(cloneUrl, cloneUrlHttps);
+    const webhookSecret = crypto.randomUUID();
+
+    const encryptOpts: Record<string, string | undefined> = {};
+    if (deployKey) {
+      const { cipher, iv, tag } = encryptSecret(deployKey);
+      encryptOpts.deployKeyCipher = cipher;
+      encryptOpts.deployKeyIv = iv;
+      encryptOpts.deployKeyTag = tag;
+    }
+    if (pat) {
+      const { cipher, iv, tag } = encryptSecret(pat);
+      encryptOpts.patCipher = cipher;
+      encryptOpts.patIv = iv;
+      encryptOpts.patTag = tag;
+    }
 
     try {
       await prisma.repository.create({
         data: {
           id: cleanId,
-          name: name,
-          path: repoPath,
+          name,
+          path: null,
+          provider,
+          cloneUrl,
+          cloneUrlHttps: cloneUrlHttps || null,
+          webhookSecret,
           baseBranch: baseBranch || "main",
           activeBranch: activeBranch || baseBranch || "main",
           triggerMode: triggerMode || "auto",
           quietPeriodSeconds: quietPeriodSeconds || 10,
           branchPattern: branchPattern || "*",
-          status: 'idle',
-          lastCommitHash: 'a1b2c3d',
-          lastCommitMessage: 'initial repository watch link',
+          status: "cloning",
+          lastCommitHash: "",
+          lastCommitMessage: "",
           lastActivityTime: new Date().toISOString(),
           stabilizationTimer: 0,
-          reviewsCount: 0
-        }
+          reviewsCount: 0,
+          ...encryptOpts,
+        },
       });
     } catch (createErr: any) {
-      // P2002 = unique constraint violation. Catches the race where two
-      // POSTs pass the pre-check simultaneously before one commits.
       if (createErr?.code === "P2002") {
-        const racer = await prisma.repository.findFirst({
-          where: { path: repoPath },
-          select: { id: true, name: true },
-        });
         return NextResponse.json(
-          {
-            error: `Directory "${repoPath}" was just linked as project "${racer?.name || "unknown"}" — duplicate prevented.`,
-            existingId: racer?.id,
-            existingName: racer?.name,
-          },
+          { error: `Repository "${name}" was just linked — duplicate prevented.` },
           { status: 409 },
         );
       }
       throw createErr;
     }
 
-    await getRealLocalPrs(repoPath, cleanId);
+    enqueue(cleanId).catch((err) => {
+      console.error(`[repos] initial fetch failed for ${cleanId}:`, err);
+      prisma.repository.update({ where: { id: cleanId }, data: { status: "error" } }).catch(() => {});
+    });
 
-    return NextResponse.json({ success: true, id: cleanId }, { status: 201 });
+    return NextResponse.json({ success: true, id: cleanId, webhookSecret }, { status: 201 });
   } catch (err: any) {
     console.error("Error inserting repository:", err);
     return NextResponse.json({ error: err.message }, { status: 500 });

@@ -15,10 +15,10 @@ import {
   User,
   X,
   Zap,
-  Database,
 } from "lucide-react";
 import type { PRFile, PullRequest, ReviewFinding } from "../../lib/types";
 import { getStatusBadgeStyle } from "../../lib/types";
+import IndexNowBanner from "./prs/IndexNowBanner";
 
 interface ScanResult {
   count: number;
@@ -41,7 +41,8 @@ interface Props {
   onSelectFilename: (name: string) => void;
   activeFile: PRFile | undefined;
   repoIndexedAt?: string | null;
-  onGoToIndexing: () => void;
+  repoId?: string;
+  onIndexComplete?: () => void;
 }
 
 export default function PrsView({
@@ -59,7 +60,8 @@ export default function PrsView({
   onSelectFilename,
   activeFile,
   repoIndexedAt,
-  onGoToIndexing,
+  repoId,
+  onIndexComplete,
 }: Props) {
   return (
     <motion.div
@@ -79,8 +81,9 @@ export default function PrsView({
           hasFindings={findings.length > 0}
           scanResult={scanResult}
           onDismissScanResult={onDismissScanResult}
+          repoId={repoId}
           repoIndexedAt={repoIndexedAt}
-          onGoToIndexing={onGoToIndexing}
+          onIndexComplete={onIndexComplete}
         />
 
         {activePR && <PrStats findings={findings} />}
@@ -112,8 +115,9 @@ function PrHeader({
   hasFindings,
   scanResult,
   onDismissScanResult,
+  repoId,
   repoIndexedAt,
-  onGoToIndexing,
+  onIndexComplete,
 }: {
   activePR: PullRequest | undefined;
   isScanning: boolean;
@@ -122,8 +126,9 @@ function PrHeader({
   hasFindings: boolean;
   scanResult: ScanResult | null;
   onDismissScanResult: () => void;
+  repoId?: string;
   repoIndexedAt?: string | null;
-  onGoToIndexing: () => void;
+  onIndexComplete?: () => void;
 }) {
   if (!activePR) {
     return (
@@ -200,24 +205,11 @@ function PrHeader({
         </div>
       </div>
 
-      {!repoIndexedAt && (
-        <div className="mt-3 p-3 bg-amber-500/[0.05] border border-amber-500/30 rounded-lg text-xs font-mono flex items-start gap-2.5">
-          <Database size={14} className="text-amber-400 shrink-0 mt-0.5" />
-          <div className="flex-1 text-amber-200/90">
-            <strong className="text-amber-300">Codebase not indexed.</strong> Reviews without an
-            index produce diff-only LLM guesses with no call-graph or semantic context. Index the
-            repo first to get real findings.
-          </div>
-          <button
-            onClick={onGoToIndexing}
-            className="bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-200 px-2.5 py-1 rounded font-bold uppercase tracking-wider text-[10px] flex items-center gap-1 cursor-pointer shrink-0"
-            title="Open the Codebase AST graph tab to run the indexer"
-          >
-            <Database size={11} />
-            <span>Index Now</span>
-          </button>
-        </div>
-      )}
+      <IndexNowBanner
+        repoId={repoId}
+        indexedAt={repoIndexedAt}
+        onIndexComplete={onIndexComplete}
+      />
 
       {scanResult && (
         <div className="mt-3 p-2 bg-cyan-950/20 border border-cyan-800/30 rounded text-xs text-cyan-400 font-mono flex items-center justify-between">

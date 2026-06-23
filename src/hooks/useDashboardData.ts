@@ -58,11 +58,17 @@ export function useDashboardData() {
   const [showAddRepoModal, setShowAddRepoModal] = useState(false);
   const [newRepoName, setNewRepoName] = useState("");
   const [newRepoPath, setNewRepoPath] = useState("");
+  const [newRepoMode, setNewRepoMode] = useState<"ssh" | "pat">("ssh");
+  const [newCloneUrl, setNewCloneUrl] = useState("");
+  const [newCloneUrlHttps, setNewCloneUrlHttps] = useState("");
+  const [newDeployKey, setNewDeployKey] = useState("");
+  const [newPat, setNewPat] = useState("");
   const [newBaseBranch, setNewBaseBranch] = useState("main");
   const [newTriggerMode, setNewTriggerMode] = useState<"auto" | "mention">("auto");
   const [newQuietPeriod, setNewQuietPeriod] = useState(10);
   const [newBranchPattern, setNewBranchPattern] = useState("feature/*");
   const [errorFeedback, setErrorFeedback] = useState<string | null>(null);
+  const [lastRegisteredRepo, setLastRegisteredRepo] = useState<{ id: string; name: string; hasPat: boolean } | null>(null);
 
   // ===== Fetchers =====
   const fetchDbConfig = async () => {
@@ -303,18 +309,30 @@ export function useDashboardData() {
   // ===== Add repo =====
   const handleAddRepo = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newRepoName.trim() || !newRepoPath.trim()) {
-      setErrorFeedback("Both Project Name and Directory Path are required.");
+    if (!newRepoName.trim()) {
+      setErrorFeedback("Project Name is required.");
       return;
     }
+
+    if (!newRepoPath.trim() && !newCloneUrl.trim()) {
+      setErrorFeedback("Either Directory Path or Clone URL is required.");
+      return;
+    }
+
+    const mode = newRepoPath.trim() ? "local" : newRepoMode;
 
     try {
       const res = await fetch("/api/repos", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          mode,
           name: newRepoName.trim(),
-          path: newRepoPath.trim(),
+          path: newRepoPath.trim() || undefined,
+          cloneUrl: newCloneUrl.trim() || undefined,
+          cloneUrlHttps: newCloneUrlHttps.trim() || undefined,
+          deployKey: newDeployKey || undefined,
+          pat: newPat || undefined,
           baseBranch: newBaseBranch,
           triggerMode: newTriggerMode,
           quietPeriodSeconds: Number(newQuietPeriod),
@@ -325,12 +343,21 @@ export function useDashboardData() {
       const data = await res.json();
       if (res.ok) {
         setShowAddRepoModal(false);
-        setNewRepoName("");
-        setNewRepoPath("");
         setErrorFeedback(null);
         await fetchRepos();
         setSelectedRepoId(data.id);
         await fetchPrsForSelectedRepo(data.id, false);
+
+        if (mode !== "local") {
+          setLastRegisteredRepo({ id: data.id, name: newRepoName.trim(), hasPat: !!newPat });
+          setNewRepoMode("ssh");
+          setNewCloneUrl("");
+          setNewCloneUrlHttps("");
+          setNewDeployKey("");
+          setNewPat("");
+        }
+        setNewRepoName("");
+        setNewRepoPath("");
       } else {
         setErrorFeedback(data.error || "Failed linking project.");
       }
@@ -443,6 +470,16 @@ export function useDashboardData() {
     setNewRepoName,
     newRepoPath,
     setNewRepoPath,
+    newRepoMode,
+    setNewRepoMode,
+    newCloneUrl,
+    setNewCloneUrl,
+    newCloneUrlHttps,
+    setNewCloneUrlHttps,
+    newDeployKey,
+    setNewDeployKey,
+    newPat,
+    setNewPat,
     newBaseBranch,
     setNewBaseBranch,
     newBranchPattern,
@@ -454,6 +491,8 @@ export function useDashboardData() {
     errorFeedback,
     setErrorFeedback,
     handleAddRepo,
+    lastRegisteredRepo,
+    setLastRegisteredRepo,
     // daemon callback
     handleTriggerReviewPass,
   };

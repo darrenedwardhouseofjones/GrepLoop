@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { findRepoByCloneUrl, gitFetch, scanRepoPrs } from "../../../../lib/webhook";
+import { verifyGitlabToken, findRepoByCloneUrl, gitFetch, scanRepoPrs } from "../../../../lib/webhook";
+import { enqueue } from "@/src/services/remoteFetchWorker";
 
 export async function POST(request: Request) {
   const event = request.headers.get("x-gitlab-event");
@@ -7,53 +8,58 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Missing x-gitlab-event header" }, { status: 400 });
   }
 
+  const token = request.headers.get("x-gitlab-token") || "";
+  const rawBody = await request.text();
+
   let payload: any;
   try {
-    payload = await request.json();
+    payload = JSON.parse(rawBody);
   } catch {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
+  const project = payload?.project;
+  if (!project) {
+    return NextResponse.json({ error: "Missing project" }, { status: 400 });
+  }
+
+  const cloneUrl = project.git_http_url || project.git_ssh_url;
+  if (!cloneUrl) {
+    return NextResponse.json({ error: "No clone URL in payload" }, { status: 400 });
+  }
+
+  const matched = await findRepoByCloneUrl(cloneUrl);
+  if (!matched) {
+    return NextResponse.json({ error: "No matching repository found" }, { status: 404 });
+  }
+
+  if (matched.webhookSecret) {
+    if (!verifyGitlabToken(token, matched.webhookSecret)) {
+      return NextResponse.json({ error: "Invalid token" }, { status: 401 });
+    }
+  }
+
   if (event === "Merge Request Hook") {
     const mr = payload.object_attributes;
-    const project = payload.project;
-    if (!mr || !project) {
-      return NextResponse.json({ error: "Missing merge request or project" }, { status: 400 });
+    if (!mr) {
+      return NextResponse.json({ error: "Missing merge request" }, { status: 400 });
     }
-
-    const cloneUrl = project.git_http_url || project.git_ssh_url;
-    if (!cloneUrl) {
-      return NextResponse.json({ error: "No clone URL in payload" }, { status: 400 });
+    if (matched.localPath) {
+      gitFetch(matched.localPath);
+      await scanRepoPrs(matched.id, matched.localPath);
+    } else {
+      enqueue(matched.id).catch((err) => console.error(`[webhook] enqueue failed for ${matched.id}:`, err));
     }
-
-    const matched = await findRepoByCloneUrl(cloneUrl);
-    if (!matched) {
-      return NextResponse.json({ error: "No matching repository found" }, { status: 404 });
-    }
-
-    gitFetch(matched.path);
-    await scanRepoPrs(matched.id, matched.path);
-
     return NextResponse.json({ ok: true, repo: matched.id, mr: mr.iid });
   }
 
   if (event === "Push Hook") {
-    const project = payload.project;
-    if (!project) return NextResponse.json({ error: "Missing project" }, { status: 400 });
-
-    const cloneUrl = project.git_http_url || project.git_ssh_url;
-    if (!cloneUrl) {
-      return NextResponse.json({ error: "No clone URL in payload" }, { status: 400 });
+    if (matched.localPath) {
+      gitFetch(matched.localPath);
+      await scanRepoPrs(matched.id, matched.localPath);
+    } else {
+      enqueue(matched.id).catch((err) => console.error(`[webhook] enqueue failed for ${matched.id}:`, err));
     }
-
-    const matched = await findRepoByCloneUrl(cloneUrl);
-    if (!matched) {
-      return NextResponse.json({ error: "No matching repository found" }, { status: 404 });
-    }
-
-    gitFetch(matched.path);
-    await scanRepoPrs(matched.id, matched.path);
-
     return NextResponse.json({ ok: true, repo: matched.id });
   }
 

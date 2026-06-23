@@ -1,5 +1,5 @@
 "use client";
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import {
   GitBranch,
@@ -19,15 +19,24 @@ import DbConfigView from "./components/views/DbConfigView";
 import LlmConfigView from "./components/views/LlmConfigView";
 import DashboardSidebar from "./components/DashboardSidebar";
 import PrsView from "./components/views/PrsView";
-import AddRepoModal from "./components/modals/AddRepoModal";
+import AddRepoModal from "./components/modals/addRepo";
+import WebhookPrompt from "./components/modals/addRepo/WebhookPrompt";
 import { useDashboardData } from "./hooks/useDashboardData";
 import { type ActiveTab } from "./lib/types";
 
 export default function App() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [activeTab, setActiveTab] = useState<ActiveTab>("prs");
+  const [pendingWebhook, setPendingWebhook] = useState<{ repoId: string; repoName: string; hasPat: boolean } | null>(null);
 
   const d = useDashboardData();
+
+  useEffect(() => {
+    if (d.lastRegisteredRepo) {
+      setPendingWebhook({ repoId: d.lastRegisteredRepo.id, repoName: d.lastRegisteredRepo.name, hasPat: d.lastRegisteredRepo.hasPat });
+      d.setLastRegisteredRepo(null);
+    }
+  }, [d.lastRegisteredRepo]);
 
   const activeAPR = d.prs.find((p) => p.id === d.selectedPrId);
   const activeRepo = d.repos.find((r) => r.id === d.selectedRepoId);
@@ -281,7 +290,8 @@ export default function App() {
                   onSelectFilename={d.setSelectedFilename}
                   activeFile={activeFile}
                   repoIndexedAt={activeRepo?.indexedAt ?? null}
-                  onGoToIndexing={() => setActiveTab("codebase")}
+                  repoId={d.selectedRepoId}
+                  onIndexComplete={d.handleTriggerReviewPass}
                 />
               )}
             </AnimatePresence>
@@ -317,6 +327,16 @@ export default function App() {
         </section>
       </main>
 
+      {/* MODAL: Post-registration webhook prompt */}
+      {pendingWebhook && (
+        <WebhookPrompt
+          repoName={pendingWebhook.repoName}
+          repoId={pendingWebhook.repoId}
+          hasPat={pendingWebhook.hasPat}
+          onClose={() => setPendingWebhook(null)}
+        />
+      )}
+
       {/* MODAL: Register a New Project Path */}
       <AnimatePresence>
         {d.showAddRepoModal && (
@@ -339,6 +359,16 @@ export default function App() {
             setNewTriggerMode={d.setNewTriggerMode}
             newQuietPeriod={d.newQuietPeriod}
             setNewQuietPeriod={d.setNewQuietPeriod}
+            newRepoMode={d.newRepoMode}
+            setNewRepoMode={d.setNewRepoMode}
+            newCloneUrl={d.newCloneUrl}
+            setNewCloneUrl={d.setNewCloneUrl}
+            newCloneUrlHttps={d.newCloneUrlHttps}
+            setNewCloneUrlHttps={d.setNewCloneUrlHttps}
+            newDeployKey={d.newDeployKey}
+            setNewDeployKey={d.setNewDeployKey}
+            newPat={d.newPat}
+            setNewPat={d.setNewPat}
           />
         )}
       </AnimatePresence>
