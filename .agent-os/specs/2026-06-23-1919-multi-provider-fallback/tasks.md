@@ -39,10 +39,13 @@ Mark each `- [ ]` as `- [x]` when complete. Per user convention: update this fil
 
 ## Phase 4 — Embedding service: chain + circuit breaker
 
-- [ ] Add module-level `let embeddingCircuitOpen = false;` in `src/services/embeddingService.ts`.
-- [ ] Refactor `generateEmbedding` to loop over `getEmbeddingChain()`, try each provider, return first success.
-- [ ] If all fail: trip `embeddingCircuitOpen`, log single `console.error` with friendly message, return `[]`.
-- [ ] Early-return `[]` at top of `generateEmbedding` if `embeddingCircuitOpen` is true.
+- [x] Add module-level `let embeddingCircuitOpen = false;` in `src/services/embeddingService.ts`.
+- [x] Refactor `generateEmbedding` to loop over `getEmbeddingChain()`, try each provider, return first success.
+- [x] If all fail: trip `embeddingCircuitOpen`, log single `console.error` with friendly message, return `[]`.
+- [x] Early-return `[]` at top of `generateEmbedding` if `embeddingCircuitOpen` is true.
+- [x] Exposed `resetCircuitBreaker` + `isCircuitOpen` as test/admin hooks.
+- [x] `npm run lint` clean.
+- [x] `npm test` — all 33 tests pass.
 - [ ] Manual: tail `/tmp/greploop-dev.log` after a scan. Confirm at most one embedding error per session.
 
 ## Phase 5 — Agentic loop logging

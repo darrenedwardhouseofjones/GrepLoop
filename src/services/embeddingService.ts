@@ -1,4 +1,16 @@
-import { getChatClient, getEmbeddingClient, getChatModel, getEmbeddingModel } from "../lib/llmClient";
+import { getChatClient, getChatModel, getEmbeddingChain } from "../lib/llmClient";
+
+/**
+ * Module-level circuit breaker. Once every provider in the embedding chain
+ * has failed in a single session, subsequent calls short-circuit to []
+ * without touching the network. Prevents log spam from the indexing service
+ * (which retries every symbol on a schedule).
+ *
+ * Reset only by process restart — good enough for dev. Production rarely
+ * hits all-providers-fail; if it does, an operator restart picks up new
+ * config.
+ */
+let embeddingCircuitOpen = false;
 
 export class EmbeddingService {
   /**
@@ -42,25 +54,63 @@ ${sourceCode}`;
 
   /**
    * Generates a vector embedding for a piece of text (usually the summary)
-   * via the configured embedding model. Returns [] if no LLM client or
-   * embedding model is configured. Semantic search gracefully degrades to
-   * "no results" when this returns empty.
+   * via the configured embedding model. Tries each provider in the chain
+   * (primary then fallback) until one succeeds.
+   *
+   * Returns [] when:
+   *   - no text provided
+   *   - the circuit breaker is open (every provider already failed this session)
+   *   - no provider is configured
+   *   - every provider in the chain threw
+   *
+   * When all providers fail, the circuit breaker trips and a single
+   * console.error is emitted with a friendly remediation hint — preventing
+   * the indexing service from spamming the dev log every few seconds.
    */
   public static async generateEmbedding(text: string): Promise<number[]> {
-    const client = getEmbeddingClient();
-    const model = getEmbeddingModel();
-    if (!client || !model || !text) return [];
+    if (!text) return [];
+    if (embeddingCircuitOpen) return [];
 
-    try {
-      const response = await client.embeddings.create({
-        model,
-        input: text,
-      });
-      return response.data?.[0]?.embedding || [];
-    } catch (e) {
-      console.error("Failed to generate embedding:", e);
-      return [];
+    const chain = getEmbeddingChain();
+    if (chain.length === 0) return [];
+
+    for (const { client, model, name } of chain) {
+      try {
+        const response = await client.embeddings.create({ model, input: text });
+        const vec = response.data?.[0]?.embedding || [];
+        if (vec.length > 0) return vec;
+        // Empty-but-no-throw response is unusual but not fatal — try next.
+        console.warn(`[embedding] provider ${name} returned empty vector, trying next`);
+      } catch (err: any) {
+        console.warn(`[embedding] provider ${name} failed: ${(err?.message || String(err)).slice(0, 120)}`);
+        continue;
+      }
     }
+
+    // Every provider failed — trip the breaker and log once.
+    if (!embeddingCircuitOpen) {
+      embeddingCircuitOpen = true;
+      console.error(
+        "[embedding] All providers failed. Further embedding calls will be skipped this session. " +
+          "Check Ollama install (scripts/fix-ollama.sh) and the cloud embedding preset in LLM Settings.",
+      );
+    }
+    return [];
+  }
+
+  /**
+   * Test hook + recovery escape hatch: manually reset the circuit breaker.
+   * Not currently called in production — the breaker auto-resets on
+   * process restart. Exposed in case an admin script wants to retry
+   * after a config fix without bouncing the server.
+   */
+  public static resetCircuitBreaker(): void {
+    embeddingCircuitOpen = false;
+  }
+
+  /** Test hook for inspecting breaker state. */
+  public static isCircuitOpen(): boolean {
+    return embeddingCircuitOpen;
   }
 
   /**
