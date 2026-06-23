@@ -102,6 +102,7 @@ model PrFile {
   diff            String?
   pullRequest     PullRequest @relation(fields: [prId], references: [id], onDelete: Cascade)
 
+  @@unique([prId, filename])
   @@map("pr_files")
 }
 

@@ -284,7 +284,7 @@ function FilesPanel({
             const isSelected = selectedFilename === file.filename;
             return (
               <button
-                key={file.filename}
+                key={file.id}
                 onClick={() => onSelectFilename(file.filename)}
                 className={`w-full text-left p-2.5 rounded-lg border transition-all text-xs font-mono flex items-center justify-between ${
                   isSelected
