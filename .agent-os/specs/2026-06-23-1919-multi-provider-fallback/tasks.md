@@ -70,10 +70,15 @@ Mark each `- [ ]` as `- [x]` when complete. Per user convention: update this fil
 
 ## Phase 7 — UI: 4 pickers in LLM Settings
 
-- [ ] Update `src/components/views/llm-config/RolePanel.tsx` (or equivalent) to render primary + fallback pickers per role.
-- [ ] Fallback picker includes a "None" option.
-- [ ] Wire save handler to persist `primaryChatPresetId`/`fallbackChatPresetId`/`primaryEmbeddingPresetId`/`fallbackEmbeddingPresetId`.
-- [ ] Add "Test Fallback" button that runs `fetchRemoteModels` against the fallback preset.
+- [x] Update `src/components/views/llm-config/RolePanel.tsx` to render primary + fallback pickers per role.
+- [x] Fallback picker includes a "(no fallback)" option.
+- [x] Wire save handler to persist all four slot ids.
+- [x] Updated `shared.ts` to use a `SlotState` record (4 slots) instead of separate chat/embedding ids.
+- [x] Updated `LlmPresetsState` type in `src/lib/types.ts` to include all four slot fields.
+- [x] Updated explanatory card to describe multi-provider fallback + honest failure mode.
+- [x] All three files under 500 lines (index 379, RolePanel 195, shared 154).
+- [x] `npm run lint` clean.
+- [x] `npm test` — all 33 tests pass.
 - [ ] Manual: load `/` in browser, open LLM Settings, confirm all four pickers render and persist across reload.
 
 ## Phase 8 — Ollama fix script + docs

@@ -96,8 +96,14 @@ export interface LlmPresetView {
 
 export interface LlmPresetsState {
   presets: LlmPresetView[];
+  /** @deprecated use primaryChatPresetId — kept for backward compat. */
   activeChatPresetId: string;
+  /** @deprecated use primaryEmbeddingPresetId — kept for backward compat. */
   activeEmbeddingPresetId: string;
+  primaryChatPresetId: string;
+  fallbackChatPresetId: string;
+  primaryEmbeddingPresetId: string;
+  fallbackEmbeddingPresetId: string;
 }
 
 export type ActiveTab = "prs" | "watcher" | "roadmap" | "db_config" | "llm_config" | "codebase";

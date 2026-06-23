@@ -8,37 +8,44 @@ import RolePanel from "./RolePanel";
 import ApiKeysPanel from "./ApiKeysPanel";
 import {
   LLM_PRESETS_CHANGED_EVENT,
+  EMPTY_SLOT_STATE,
   fromViewState,
   newPreset,
   toPutBody,
   type RemoteModel,
   type SaveResult,
+  type SlotId,
+  type SlotState,
   type WorkingPreset,
 } from "./shared";
 
 type Tab = "chat" | "embedding" | "api";
+type RoleTab = "chat" | "embedding";
 
 /**
  * Two-tab LLM config: Chat (PR reviewer) and Embedding (semantic search).
- * Each tab picks one provider preset + one model for that role.
+ * Each tab picks a primary + optional fallback provider preset, and one
+ * model for each role on each chosen preset.
  *
- * Why tabs vs. one long page:
- *  - The same provider catalog may be wanted for both roles, but each role
- *    needs its own model picker. Tabs keep the picker choice unambiguous.
- *  - Reduces visual noise: only one model picker visible at a time.
+ * Multi-provider fallback:
+ *  - Primary provider is tried first for every review/embedding call.
+ *  - If primary fails, fallback is tried (when configured + distinct).
+ *  - If both fail, review returns empty findings + null rating + actionable
+ *    systemWarn; embedding trips a circuit breaker and returns [] silently.
  *
  * Sidebar sync:
  *  - After a successful save, we dispatch LLM_PRESETS_CHANGED_EVENT on
  *    window. DashboardSidebar listens for it and refetches immediately,
- *    instead of waiting up to 10s for its next poll. This was the root
- *    cause of "the model shown in the bottom left is wrong" — the sidebar
- *    was reading stale state while the user had unsaved edits here.
+ *    instead of waiting up to 10s for its next poll.
  */
 export default function LlmConfigTabs() {
   const [presets, setPresets] = useState<WorkingPreset[]>([]);
-  const [activeChatId, setActiveChatId] = useState("");
-  const [activeEmbeddingId, setActiveEmbeddingId] = useState("");
+  const [slots, setSlots] = useState<SlotState>(EMPTY_SLOT_STATE);
   const [tab, setTab] = useState<Tab>("chat");
+  const [focusSlot, setFocusSlot] = useState<Record<RoleTab, "primary" | "fallback">>({
+    chat: "primary",
+    embedding: "primary",
+  });
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [saveResult, setSaveResult] = useState<SaveResult | null>(null);
@@ -55,8 +62,7 @@ export default function LlmConfigTabs() {
         if (cancelled) return;
         const mapped = fromViewState(data);
         setPresets(mapped.presets);
-        setActiveChatId(mapped.activeChatId);
-        setActiveEmbeddingId(mapped.activeEmbeddingId);
+        setSlots(mapped.slots);
       } catch (err) {
         console.error("Failed loading LLM presets:", err);
       } finally {
@@ -75,28 +81,40 @@ export default function LlmConfigTabs() {
     markDirty();
   };
 
-  const handleSelectActive = (role: Tab, id: string) => {
-    if (role === "chat") setActiveChatId(id);
-    else setActiveEmbeddingId(id);
+  const setSlot = (slot: SlotId, id: string) => {
+    setSlots((prev) => ({ ...prev, [slot]: id }));
+    setFocusSlot((prev) => ({
+      ...prev,
+      [slot.endsWith("Chat") ? "chat" : "embedding"]: slot.startsWith("primary") ? "primary" : "fallback",
+    }));
     markDirty();
   };
 
-  const handleAddProvider = (role: Tab) => {
+  const handleAddProvider = (role: RoleTab) => {
     const fresh = newPreset();
     setPresets((prev) => [...prev, fresh]);
-    if (role === "chat") setActiveChatId(fresh.id);
-    else setActiveEmbeddingId(fresh.id);
+    setSlot(role === "chat" ? "primaryChat" : "primaryEmbedding", fresh.id);
     markDirty();
   };
 
-  const handleDeleteActive = (role: Tab) => {
-    const id = role === "chat" ? activeChatId : activeEmbeddingId;
+  const handleDeleteActive = (role: RoleTab) => {
+    const slotKey = (focusSlot[role] === "primary"
+      ? `primary${capitalize(role)}`
+      : `fallback${capitalize(role)}`) as SlotId;
+    const id = slots[slotKey];
     if (!id) return;
-    if (activeChatId === id || activeEmbeddingId === id) {
-      alert("Clear this preset's active role (pick another provider in the dropdown) before deleting it.");
+
+    const inUse = (Object.keys(slots) as SlotId[]).filter(
+      (k) => k !== slotKey && slots[k] === id,
+    );
+    if (inUse.length > 0) {
+      alert("This preset is still in use by another slot. Clear that slot first.");
       return;
     }
+
     setPresets((prev) => prev.filter((p) => p.id !== id));
+    setSlots((prev) => ({ ...prev, [slotKey]: "" }));
+    setFocusSlot((prev) => ({ ...prev, [role]: "primary" }));
     markDirty();
   };
 
@@ -143,7 +161,7 @@ export default function LlmConfigTabs() {
       const res = await fetch("/api/llm/presets", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(toPutBody(presets, activeChatId, activeEmbeddingId)),
+        body: JSON.stringify(toPutBody(presets, slots)),
       });
       const data = await res.json();
       if (res.ok && data.ok) {
@@ -180,8 +198,16 @@ export default function LlmConfigTabs() {
     );
   }
 
-  const activeId = tab === "chat" ? activeChatId : activeEmbeddingId;
-  const canDeleteActive = Boolean(activeId) && presets.length > 1;
+  const isChatTab = tab === "chat";
+  const roleTab: RoleTab | null = isChatTab ? "chat" : tab === "embedding" ? "embedding" : null;
+  const primaryId = roleTab ? slots[roleTab === "chat" ? "primaryChat" : "primaryEmbedding"] : "";
+  const fallbackId = roleTab ? slots[roleTab === "chat" ? "fallbackChat" : "fallbackEmbedding"] : "";
+  const focusedId = roleTab ? (focusSlot[roleTab] === "primary" ? primaryId : fallbackId) : "";
+  // Block delete when the focused preset is referenced by any slot.
+  const slotsUsingFocused = focusedId
+    ? (Object.keys(slots) as SlotId[]).filter((k) => slots[k] === focusedId)
+    : [];
+  const canDeleteActive = Boolean(focusedId) && presets.length > 1 && slotsUsingFocused.length === 1;
 
   return (
     <motion.div
@@ -204,7 +230,7 @@ export default function LlmConfigTabs() {
               LLM Router
             </h3>
             <p className="text-xs text-slate-400">
-              Pick a provider and model for each role. The two roles can use different providers — e.g. OpenRouter for chat + Ollama for embeddings. Changes save to <code>.greploop/llm-presets.json</code> and take effect immediately.
+              Pick a primary + optional fallback provider for each role. If the primary fails, the fallback is tried automatically. Changes save to <code>.greploop/llm-presets.json</code> and take effect immediately.
             </p>
           </div>
           <button
@@ -236,14 +262,17 @@ export default function LlmConfigTabs() {
         ) : (
           <>
             <RolePanel
-              role={tab}
-              accent={tab === "chat" ? "cyan" : "indigo"}
+              role={roleTab!}
+              accent={roleTab === "chat" ? "cyan" : "indigo"}
               presets={presets}
-              activePresetId={activeId}
+              primaryPresetId={primaryId}
+              fallbackPresetId={fallbackId}
+              focusSlot={focusSlot[roleTab!]}
               canDeleteActive={canDeleteActive}
-              onSelectActive={(id) => handleSelectActive(tab, id)}
-              onAddProvider={() => handleAddProvider(tab)}
-              onDeleteActive={() => handleDeleteActive(tab)}
+              onSelectPrimary={(id) => setSlot(roleTab === "chat" ? "primaryChat" : "primaryEmbedding", id)}
+              onSelectFallback={(id) => setSlot(roleTab === "chat" ? "fallbackChat" : "fallbackEmbedding", id)}
+              onAddProvider={() => handleAddProvider(roleTab!)}
+              onDeleteActive={() => handleDeleteActive(roleTab!)}
               onUpdatePreset={updatePreset}
               onFetchModels={handleFetchModels}
             />
@@ -280,6 +309,10 @@ export default function LlmConfigTabs() {
       </div>
     </motion.div>
   );
+}
+
+function capitalize(s: string): string {
+  return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
 function TabButton({
@@ -319,14 +352,14 @@ function ExplanatoryCard() {
     <div className="p-4 bg-slate-900/40 rounded-xl border border-white/5 space-y-3">
       <h4 className="text-xs font-bold font-mono text-slate-300 uppercase flex items-center gap-1.5">
         <Sparkles size={13} className="text-cyan-400" />
-        <span>How the Router Works</span>
+        <span>How Multi-Provider Fallback Works</span>
       </h4>
       <ul className="space-y-2 text-[11px] text-slate-400 leading-relaxed pl-3 list-disc">
         <li>
-          <strong className="text-slate-300">Two roles, two providers:</strong> the PR Reviewer (chat) and Semantic Search (embedding) can use different providers — e.g. OpenRouter for chat + local Ollama for embeddings. Or the same provider for both.
+          <strong className="text-slate-300">Primary + fallback per role:</strong> for each of chat and embedding, pick a primary provider (always tried first) and an optional fallback (tried when the primary fails). Leave fallback as <code>(no fallback)</code> for single-provider mode.
         </li>
         <li>
-          <strong className="text-slate-300">Per-tab picker:</strong> each tab shows the active provider dropdown at the top and a single model picker scoped to that role. Add a new provider from either tab; it shows up in both.
+          <strong className="text-slate-300">Honest failure:</strong> if both providers fail, the review returns an empty findings list with a null rating and a clear actionable banner — never templated/hallucinated output. Embeddings trip a session circuit breaker and return empty until you fix the underlying issue.
         </li>
         <li>
           <strong className="text-slate-300">No restart:</strong> changes take effect on the next request. Keys are stored in <code>.greploop/llm-presets.json</code> with mode 0600.

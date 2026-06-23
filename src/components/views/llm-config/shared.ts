@@ -37,6 +37,18 @@ export interface SaveResult {
 }
 
 /**
+ * The four preset slots. Each role (chat / embedding) has a primary and
+ * a fallback. Fallback is optional — empty string means "no fallback".
+ */
+export type SlotId =
+  | "primaryChat"
+  | "fallbackChat"
+  | "primaryEmbedding"
+  | "fallbackEmbedding";
+
+export type SlotState = Record<SlotId, string>;
+
+/**
  * Local working copy of a preset. Differs from LlmPresetView by carrying
  * apiKey as free-text (empty string when the user hasn't typed a new key —
  * server preserves the stored value in that case).
@@ -74,14 +86,23 @@ export function newPreset(): WorkingPreset {
   };
 }
 
+export const EMPTY_SLOT_STATE: SlotState = {
+  primaryChat: "",
+  fallbackChat: "",
+  primaryEmbedding: "",
+  fallbackEmbedding: "",
+};
+
 /**
  * Maps the server's masked view into a working copy with all UI-only
  * fields initialized to their defaults.
+ *
+ * Reads the new primaryX / fallbackX fields when present, falls back to
+ * the legacy activeX field names otherwise.
  */
 export function fromViewState(data: LlmPresetsState): {
   presets: WorkingPreset[];
-  activeChatId: string;
-  activeEmbeddingId: string;
+  slots: SlotState;
 } {
   return {
     presets: data.presets.map((p) => ({
@@ -97,20 +118,23 @@ export function fromViewState(data: LlmPresetsState): {
       fetchResult: null,
       isFetching: false,
     })),
-    activeChatId: data.activeChatPresetId,
-    activeEmbeddingId: data.activeEmbeddingPresetId,
+    slots: {
+      primaryChat: data.primaryChatPresetId ?? data.activeChatPresetId ?? "",
+      fallbackChat: data.fallbackChatPresetId ?? "",
+      primaryEmbedding: data.primaryEmbeddingPresetId ?? data.activeEmbeddingPresetId ?? "",
+      fallbackEmbedding: data.fallbackEmbeddingPresetId ?? "",
+    },
   };
 }
 
 /**
  * Builds the PUT body the API expects. apiKey is the user-typed value
  * (empty string means "keep stored" on the server side).
+ *
+ * Sends both the new primaryX/fallbackX field names and the legacy
+ * activeX aliases — server tolerates either shape.
  */
-export function toPutBody(
-  presets: WorkingPreset[],
-  activeChatId: string,
-  activeEmbeddingId: string,
-) {
+export function toPutBody(presets: WorkingPreset[], slots: SlotState) {
   return {
     presets: presets.map((p) => ({
       id: p.id,
@@ -120,7 +144,11 @@ export function toPutBody(
       chatModel: p.chatModel,
       embeddingModel: p.embeddingModel,
     })),
-    activeChatPresetId: activeChatId,
-    activeEmbeddingPresetId: activeEmbeddingId,
+    primaryChatPresetId: slots.primaryChat,
+    fallbackChatPresetId: slots.fallbackChat,
+    primaryEmbeddingPresetId: slots.primaryEmbedding,
+    fallbackEmbeddingPresetId: slots.fallbackEmbedding,
+    activeChatPresetId: slots.primaryChat,
+    activeEmbeddingPresetId: slots.primaryEmbedding,
   };
 }
