@@ -274,6 +274,7 @@ export function useDashboardData() {
   // ===== PR scan =====
   const handleTriggerPrScan = async () => {
     if (!selectedPrId) return;
+    console.log(`[scan] handleTriggerPrScan: starting scan for prId=${selectedPrId}`);
     setIsScanning(true);
     setScanResult(null);
 
@@ -284,6 +285,7 @@ export function useDashboardData() {
     const activeRepoName = repos.find((r) => r.id === selectedRepoId)?.name || selectedRepoId;
 
     try {
+      console.log(`[scan] handleTriggerPrScan: POST /api/prs/${selectedPrId}/scan`);
       const res = await fetch(`/api/prs/${selectedPrId}/scan`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -293,16 +295,19 @@ export function useDashboardData() {
       });
 
       const result = await res.json();
+      console.log(`[scan] handleTriggerPrScan: response status=${res.status}, findings=${result.findings?.length}, rating=${result.rating}, model=${result.usedModel}`);
       if (res.ok) {
         setScanResult({
           count: result.findings?.length || 0,
           model: result.usedModel,
           notice: result.systemWarn,
         });
+        console.log(`[scan] handleTriggerPrScan: refetching PR details, PRs, repos, logs`);
         await fetchPrDetails(selectedPrId);
         if (selectedRepoId) await fetchPrsForSelectedRepo(selectedRepoId, true);
         await fetchRepos();
         await fetchLogs();
+        console.log(`[scan] handleTriggerPrScan: refetch complete`);
       } else if (res.status === 409 && result.error === "INDEX_REQUIRED") {
         setPrs((prev) =>
           prev.map((p) => (p.id === selectedPrId ? { ...p, status: "Pending" } : p)),

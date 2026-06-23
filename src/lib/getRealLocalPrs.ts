@@ -71,9 +71,13 @@ interface RepoFile {
  * or rebased) are skipped — they aren't real pending PRs.
  */
 export async function getRealLocalPrs(repoPath: string, repoId: string) {
+  console.log(`[scan] getRealLocalPrs: scanning repoPath=${repoPath} repoId=${repoId}`);
   try {
     const resolvedPath = path.isAbsolute(repoPath) ? repoPath : path.resolve(/* turbopackIgnore: true */ process.cwd(), repoPath);
-    if (!fs.existsSync(resolvedPath) || !fs.statSync(resolvedPath).isDirectory()) return null;
+    if (!fs.existsSync(resolvedPath) || !fs.statSync(resolvedPath).isDirectory()) {
+      console.log(`[scan] getRealLocalPrs: path not found or not a directory: ${resolvedPath}`);
+      return null;
+    }
 
     try {
       git(["rev-parse", "--is-inside-work-tree"], resolvedPath);
@@ -117,12 +121,27 @@ export async function getRealLocalPrs(repoPath: string, repoId: string) {
         if (filesList.length === 0) continue;
 
         const prId = `real-pr-${repoId}-${branch.name.replace(/\//g, "-")}`;
+
+        // Preserve existing status — the background poll must NOT reset a
+        // PR that is currently "In Progress" (scanning) or "Completed" back
+        // to "Pending". Only new PRs get "Pending".
+        const existing = await prisma.pullRequest.findUnique({
+          where: { id: prId },
+          select: { status: true },
+        });
+        const status = existing?.status === "In Progress" || existing?.status === "Completed"
+          ? existing.status
+          : "Pending";
+        if (existing && existing.status !== status) {
+          console.log(`[scan] getRealLocalPrs: preserving status="${existing.status}" for ${prId} (would have reset to "${status}")`);
+        }
+
         const prData = {
           repoId,
           title: `PR from local: ${branch.name}`,
           sourceBranch: branch.name,
           targetBranch: baseBranch,
-          status: "Pending",
+          status,
           author: branch.author,
           commitHash: branch.hash,
           createdAt: branch.date,

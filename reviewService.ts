@@ -200,11 +200,14 @@ Do not sugarcoat. Do not soften the blow. If the code is bad, say so. If it's cl
  * when the LLM is unconfigured or fails — UI surfaces this via systemWarn.
  */
 export async function runPrScan(prId: string, preloadedFiles?: any[]): Promise<ScanResult> {
+  console.log(`[scan] runPrScan: starting for prId=${prId}, preloadedFiles=${preloadedFiles?.length}`);
   // 1. Fetch Pull Request details
   const pr = await prisma.pullRequest.findUnique({ where: { id: prId } });
   if (!pr) {
+    console.log(`[scan] runPrScan: PR not found prId=${prId}`);
     throw new Error(`Pull Request with ID "${prId}" was not found.`);
   }
+  console.log(`[scan] runPrScan: PR found, repoId=${pr.repoId}`);
 
   // 2. Fetch modified files and diff content (use preloaded if provided,
   //    otherwise read from DB — the latter can race with background
@@ -215,13 +218,16 @@ export async function runPrScan(prId: string, preloadedFiles?: any[]): Promise<S
       where: { prId },
       select: { filename: true, status: true, additions: true, deletions: true, originalContent: true, modifiedContent: true, diff: true },
     });
+  console.log(`[scan] runPrScan: got ${files.length} files`);
   if (files.length === 0) {
+    console.log(`[scan] runPrScan: no files found, marking Failed`);
     await prisma.pullRequest.updateMany({ where: { id: prId }, data: { status: "Failed" } });
     throw new Error("No modified files or diffs found in this Pull Request to scan.");
   }
 
   // 3. Mark PR status as 'In Progress' for real-time visual progress
   await prisma.pullRequest.updateMany({ where: { id: prId }, data: { status: "In Progress" } });
+  console.log(`[scan] runPrScan: status set to In Progress`);
 
   let findings: any[] = [];
   let rating: number | null = null;
@@ -440,6 +446,7 @@ ${diffPayload}`;
   }
 
   // 6. Persist findings
+  console.log(`[scan] runPrScan: persisting ${findings.length} findings`);
   await prisma.reviewFinding.deleteMany({ where: { prId } });
 
   let index = 1;
@@ -463,6 +470,7 @@ ${diffPayload}`;
   }
 
   // 7. Update PR rating + status
+  console.log(`[scan] runPrScan: setting PR status=Completed rating=${rating}`);
   await prisma.pullRequest.updateMany({ where: { id: prId }, data: { status: "Completed", rating } });
 
   // 8. Audit trail
@@ -485,6 +493,7 @@ ${diffPayload}`;
     data: { reviewsCount: { increment: 1 }, status: "idle" },
   });
 
+  console.log(`[scan] runPrScan: returning success rating=${rating} findings=${findings.length} model=${usedModel}`);
   return {
     success: true,
     rating,
