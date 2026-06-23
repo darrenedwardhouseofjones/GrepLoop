@@ -41,7 +41,7 @@ export function useDashboardData() {
 
   // ===== Repositories & PRs =====
   const [repos, setRepos] = useState<Repository[]>([]);
-  const [selectedRepoId, setSelectedRepoId] = useState<string>("greploop-core");
+  const [selectedRepoId, setSelectedRepoId] = useState<string>("");
   const [prs, setPrs] = useState<PullRequest[]>([]);
   const [selectedPrId, setSelectedPrId] = useState<string>("");
   const [prFiles, setPrFiles] = useState<PRFile[]>([]);

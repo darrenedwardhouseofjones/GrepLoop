@@ -63,7 +63,7 @@ export default function GitWatcher({ onTriggerReviewPass, activeRepoId, onRepoCh
   const [repos, setRepos] = useState<WatchedRepo[]>([]);
 
   // Selected repo ID for detail / target controls
-  const [selectedId, setSelectedId] = useState<string>(activeRepoId || 'greploop-core');
+  const [selectedId, setSelectedId] = useState<string>(activeRepoId || '');
 
   // Helper to fetch/reload repository list from SQLite database
   const fetchReposFromDb = () => {
