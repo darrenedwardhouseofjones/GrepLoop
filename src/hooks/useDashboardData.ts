@@ -113,9 +113,16 @@ export function useDashboardData() {
         setRepos(data);
         // Reset selection if it points at a repo that no longer exists
         // (covers the "greploop-core" bootstrap default and deleted repos).
+        //
+        // Read current selection from a ref, not the state closure. The
+        // background poller (below) captures the FIRST render's fetchRepos,
+        // which closes over selectedRepoId="" — reading the state directly
+        // here would always see "" and force selection back to data[0]
+        // every 15 seconds ("bam! another project opens" symptom).
+        const currentSelected = repoIdRef.current;
         if (data.length > 0) {
-          const stillExists = data.some((r: Repository) => r.id === selectedRepoId);
-          if (!selectedRepoId || !stillExists) {
+          const stillExists = data.some((r: Repository) => r.id === currentSelected);
+          if (!currentSelected || !stillExists) {
             setSelectedRepoId(data[0].id);
           }
         }
