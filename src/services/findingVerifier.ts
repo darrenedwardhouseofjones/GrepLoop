@@ -2,7 +2,14 @@
  * v1 Finding Verifier.
  *
  * Post-candidate, pre-persistence validation of LLM-generated findings.
- * Two layers, both grounded in the actual code on disk:
+ * Three layers, two cheap structural rejects plus grounded-in-code checks:
+ *
+ *   Stage 0 — structural rejects (ALL findings, no disk I/O)
+ *     1. Explanation is empty/whitespace → reject
+ *        (a finding with no rationale cannot be verified)
+ *     2. Cited file is documentation (.md, docs/, .agent-os/, README,
+ *        CHANGELOG, etc.) → reject unless `docsReview: true`
+ *        (docs are context for understanding intent, not bug locations)
  *
  *   Stage A — line/file validation (ALL findings)
  *     1. File exists
@@ -32,6 +39,9 @@
  *     filter is what hides them.
  *   - `downgraded` means "real issue but overstated" — the UI shows a
  *     amber chip but doesn't drop the finding.
+ *   - Stage 0 rejects are the cheapest + highest-leverage: they catch
+ *     the failure mode where a flash chat model dumps dozens of
+ *     findings against docs files with empty explanations.
  *
  * Scope v1: line/file validation + counter-evidence for the 4 families.
  * Full PRD §14.6 5-class taxonomy (confirmed/likely/partially_mitigated/
@@ -57,7 +67,58 @@ export interface VerificationResult {
   note: string;
 }
 
+/**
+ * Options for a verification pass.
+ *
+ *   docsReview — when true, findings citing documentation files
+ *                (.md, docs/, .agent-os/, etc.) are NOT auto-rejected.
+                Set when the scan's explicit purpose is to review docs
+ *                (a future scan mode). Default false — normal PR code
+ *                reviews treat docs as context, not bug locations.
+ */
+export interface VerifyOptions {
+  docsReview?: boolean;
+}
+
 const CONTEXT_RADIUS = 5;
+
+/**
+ * File extensions + path patterns treated as documentation. Findings
+ * citing these are auto-rejected in normal code review mode — docs are
+ * context for understanding intent, not bug locations.
+ *
+ * If you add a new doc format, add it here. Anything NOT in this list
+ * (.ts, .tsx, .js, .prisma, .sql, .json, .yml, .tf, etc.) stays
+ * reviewable.
+ */
+const DOCS_EXTENSIONS = new Set([
+  ".md",
+  ".markdown",
+  ".mdx",
+  ".txt",
+  ".rst",
+  ".adoc",
+  ".asciidoc",
+  ".org",
+]);
+
+const DOCS_PATH_PATTERNS = [
+  /^\.agent-os\//i,
+  /^docs?\//i,
+  /^documentation\//i,
+  /(^|\/)CHANGELOG/i,
+  /(^|\/)CONTRIBUTING/i,
+  /(^|\/)LICENSE/i,
+  /(^|\/)README/i,
+  /(^|\/)AUTHORS/i,
+];
+
+function isDocumentationFile(filename: string): boolean {
+  const normalized = filename.replace(/\\/g, "/").replace(/^\.\//, "");
+  const ext = path.extname(normalized).toLowerCase();
+  if (DOCS_EXTENSIONS.has(ext)) return true;
+  return DOCS_PATH_PATTERNS.some((p) => p.test(normalized));
+}
 
 /**
  * Verify a batch of findings. Returns a Map keyed by finding.id so the
@@ -68,12 +129,13 @@ export async function verifyFindings(
   findings: CandidateFinding[],
   repoPath: string,
   prId: string,
+  options: VerifyOptions = {},
 ): Promise<Map<string, VerificationResult>> {
   const results = new Map<string, VerificationResult>();
 
   for (const finding of findings) {
     try {
-      const result = await verifyOne(finding, repoPath, prId);
+      const result = await verifyOne(finding, repoPath, prId, options);
       results.set(finding.id, result);
     } catch (err) {
       console.warn(
@@ -94,7 +156,28 @@ async function verifyOne(
   finding: CandidateFinding,
   repoPath: string,
   prId: string,
+  options: VerifyOptions,
 ): Promise<VerificationResult> {
+  // ─── Stage 0: cheap structural rejects (no disk I/O) ──────────────
+  // These two checks catch the failure mode where a flash-style chat
+  // model dumps dozens of high-confidence findings against docs files
+  // with empty explanations. Both are auto-rejected; the caller filters
+  // them out of the UI via the `verificationStatus: { not: "rejected" }`
+  // route clause.
+  if (!finding.explanation || !finding.explanation.trim()) {
+    return {
+      status: "rejected",
+      note: "finding has no explanation — cannot verify a claim with no rationale",
+    };
+  }
+
+  if (!options.docsReview && isDocumentationFile(finding.filename)) {
+    return {
+      status: "rejected",
+      note: `cited file "${finding.filename}" is documentation, not source code — docs are context for the review, not bug locations. Re-cite against the implementation file.`,
+    };
+  }
+
   // ─── Stage A: line/file validation ─────────────────────────────────
   const stageA = validateLineAndFile(finding, repoPath, prId);
   if (stageA) return stageA;

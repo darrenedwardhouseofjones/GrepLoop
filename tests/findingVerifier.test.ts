@@ -65,7 +65,7 @@ function finding(opts: Partial<CandidateFinding> & { id: string }): CandidateFin
     severity: "blocker",
     filename: "auth.ts",
     line: 14,
-    explanation: "",
+    explanation: "auth check missing",
     ...opts,
   };
 }
@@ -147,5 +147,112 @@ describe("findingVerifier", () => {
     expect(v).toBeDefined();
     // File doesn't exist → rejected (still not a throw).
     expect(v?.status).toBe("rejected");
+  });
+});
+
+describe("findingVerifier Stage 0 — structural rejects", () => {
+  it("rejects findings with an empty explanation", async () => {
+    const results = await verifyFindings(
+      [finding({ id: "s0a", filename: "auth.ts", explanation: "" })],
+      tmpDir,
+      "test-pr",
+    );
+    expect(results.get("s0a")?.status).toBe("rejected");
+    expect(results.get("s0a")?.note).toMatch(/no explanation/);
+  });
+
+  it("rejects findings with a whitespace-only explanation", async () => {
+    const results = await verifyFindings(
+      [finding({ id: "s0b", filename: "auth.ts", explanation: "   \n\t  " })],
+      tmpDir,
+      "test-pr",
+    );
+    expect(results.get("s0b")?.status).toBe("rejected");
+    expect(results.get("s0b")?.note).toMatch(/no explanation/);
+  });
+
+  it("rejects findings citing a .md file in normal code-review mode", async () => {
+    const results = await verifyFindings(
+      [finding({
+        id: "s0c",
+        filename: ".agent-os/specs/2026-06-23-website-build-pipeline-impl/tasks.md",
+        line: 8,
+        explanation: "Security vulnerability in cascading delete",
+      })],
+      tmpDir,
+      "test-pr",
+    );
+    expect(results.get("s0c")?.status).toBe("rejected");
+    expect(results.get("s0c")?.note).toMatch(/documentation, not source code/);
+  });
+
+  it("rejects findings citing docs/ paths even without .md extension", async () => {
+    const results = await verifyFindings(
+      [finding({
+        id: "s0d",
+        filename: "docs/CHANGELOG",
+        line: 1,
+        explanation: "Missing entry for security fix",
+      })],
+      tmpDir,
+      "test-pr",
+    );
+    expect(results.get("s0d")?.status).toBe("rejected");
+    expect(results.get("s0d")?.note).toMatch(/documentation, not source code/);
+  });
+
+  it("rejects findings citing README.md at repo root", async () => {
+    const results = await verifyFindings(
+      [finding({
+        id: "s0e",
+        filename: "README.md",
+        line: 1,
+        explanation: "Setup instructions are wrong",
+      })],
+      tmpDir,
+      "test-pr",
+    );
+    expect(results.get("s0e")?.status).toBe("rejected");
+    expect(results.get("s0e")?.note).toMatch(/documentation, not source code/);
+  });
+
+  it("allows findings citing .md files when docsReview mode is on", async () => {
+    // Same finding as s0c, but with { docsReview: true } — should pass
+    // Stage 0 and fall through to Stage A. The file doesn't actually
+    // exist in tmpDir, so Stage A rejects it for "file does not exist".
+    // That's correct — the point is Stage 0 didn't auto-reject it.
+    const results = await verifyFindings(
+      [finding({
+        id: "s0f",
+        filename: ".agent-os/specs/foo/tasks.md",
+        line: 8,
+        explanation: "Security vulnerability in cascading delete",
+      })],
+      tmpDir,
+      "test-pr",
+      { docsReview: true },
+    );
+    const v = results.get("s0f");
+    expect(v?.status).toBe("rejected");
+    expect(v?.note).toMatch(/does not exist/);
+  });
+
+  it("does NOT reject findings citing non-doc files without extensions", async () => {
+    // Files like `Dockerfile`, `Makefile`, `Procfile` have no extension
+    // but are legitimate source. They should pass Stage 0 and fall
+    // through to Stage A (where they'll be rejected if missing on disk).
+    const results = await verifyFindings(
+      [finding({
+        id: "s0g",
+        filename: "Dockerfile",
+        line: 1,
+        explanation: "Runs as root — privilege escalation risk",
+      })],
+      tmpDir,
+      "test-pr",
+    );
+    const v = results.get("s0g");
+    // Not a Stage 0 reject — passes through to Stage A which checks disk.
+    expect(v?.note).not.toMatch(/documentation, not source code/);
   });
 });
