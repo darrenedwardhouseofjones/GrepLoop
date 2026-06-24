@@ -1,15 +1,19 @@
 import { getChatClient, getChatModel, getEmbeddingChain } from "../lib/llmClient";
 
 /**
- * Required embedding dimensionality. Matches the `vector(1536)` column
+ * Required embedding dimensionality. Matches the `vector(1024)` column
  * type on `symbols.embedding` in `prisma/schema.prisma`. Vectors of any
  * other length are rejected by Postgres on insert with a cryptic error,
  * so we guard here and skip the write instead.
  *
  * If you swap to an embedding model with a different output dim,
  * update this constant AND the schema column in the same PR.
+ *
+ * Current: 1024 matches `mxbai-embed-large` (Ollama). To switch to a
+ * 1536-dim model (OpenAI text-embedding-3-small, Voyage voyage-code-2),
+ * bump this + the schema column together.
  */
-export const EMBEDDING_DIM = 1536;
+export const EMBEDDING_DIM = 1024;
 
 /**
  * Module-level circuit breaker. Once every provider in the embedding chain
@@ -97,13 +101,12 @@ ${sourceCode}`;
         if (vec.length !== EMBEDDING_DIM) {
           // Wrong-shape vector — persisting it would either fail at the
           // DB cast or, worse, succeed with corrupted similarity scores.
-          // Skip + warn so the summary still lands.
+          // Try the fallback provider before giving up on this symbol.
           console.warn(
             `[embedding] provider ${name} returned ${vec.length} dimensions, ` +
-              `schema requires ${EMBEDDING_DIM}. Summary saved; semantic search ` +
-              `disabled for this symbol. Swap the model or update EMBEDDING_DIM.`,
+              `schema requires ${EMBEDDING_DIM}. Trying next embedding provider.`,
           );
-          return [];
+          continue;
         }
         return vec;
       } catch (err: any) {
@@ -117,8 +120,8 @@ ${sourceCode}`;
       embeddingCircuitOpen = true;
       console.error(
         "[embedding] All providers failed. Further embedding calls will be skipped this session. " +
-          "Reinstall Ollama (`curl -fsSL https://ollama.com/install.sh | sh` && `ollama pull mxbai-embed-large`) " +
-          "or configure a cloud embedding fallback in LLM Settings, then restart the dev server.",
+          `Configure an embedding model that returns ${EMBEDDING_DIM} dimensions ` +
+          "or add a compatible cloud embedding fallback in LLM Settings, then restart the dev server.",
       );
     }
     return [];

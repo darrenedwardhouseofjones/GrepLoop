@@ -23,6 +23,8 @@ import {
  */
 export function useDashboardData() {
   const pollInFlight = useRef(false);
+  const latestPrsRequest = useRef(0);
+  const latestDetailsRequest = useRef(0);
   // ===== Database configuration =====
   const [dbConfig, setDbConfig] = useState<DbConfig>({
     dialect: "postgresql",
@@ -124,17 +126,40 @@ export function useDashboardData() {
   };
 
   const fetchPrsForSelectedRepo = async (repoId: string, retainSelection = true) => {
+    const requestId = ++latestPrsRequest.current;
+    if (!retainSelection) {
+      latestDetailsRequest.current += 1;
+      setPrs([]);
+      setSelectedPrId("");
+      setPrFiles([]);
+      setSelectedFilename("");
+      setFindings([]);
+      setReviewRun(null);
+      setRejectedCount(0);
+      setStale(false);
+    }
+
     try {
       const res = await fetch(`/api/repos/${repoId}/prs`);
       const data = await res.json();
-      if (Array.isArray(data)) {
-        setPrs(data);
-        if (data.length > 0) {
+      if (requestId !== latestPrsRequest.current) return;
+
+      const prsData = Array.isArray(data) && data.length === 0
+        ? await refreshPrsAfterEmptySnapshot(repoId, requestId)
+        : data;
+      if (requestId !== latestPrsRequest.current) return;
+
+      if (Array.isArray(prsData)) {
+        if (retainSelection && prs.length > 0 && prsData.length === 0) {
+          return;
+        }
+        setPrs(prsData);
+        if (prsData.length > 0) {
           setSelectedPrId((prev) => {
-            if (retainSelection && prev && data.some((p: PullRequest) => p.id === prev)) {
+            if (retainSelection && prev && prsData.some((p: PullRequest) => p.id === prev)) {
               return prev;
             }
-            return data[0].id;
+            return prsData[0].id;
           });
         } else {
           setSelectedPrId("");
@@ -147,11 +172,33 @@ export function useDashboardData() {
     }
   };
 
-  const fetchPrDetails = async (prId: string) => {
+  const refreshPrsAfterEmptySnapshot = async (repoId: string, requestId: number) => {
+    try {
+      const refreshRes = await fetch(`/api/repos/${repoId}/prs`, { method: "POST" });
+      const refreshData = await refreshRes.json();
+      if (requestId !== latestPrsRequest.current) return [];
+      return Array.isArray(refreshData) ? refreshData : [];
+    } catch (err) {
+      console.warn("Failed refreshing empty PR snapshot for repo " + repoId, err);
+      return [];
+    }
+  };
+
+  const fetchPrDetails = async (prId: string, clearBeforeLoad = true) => {
     if (!prId) return;
+    const requestId = ++latestDetailsRequest.current;
+    if (clearBeforeLoad) {
+      setPrFiles([]);
+      setSelectedFilename("");
+      setFindings([]);
+      setReviewRun(null);
+      setRejectedCount(0);
+      setStale(false);
+    }
     try {
       const filesRes = await fetch(`/api/prs/${prId}/files`);
       const filesData = await filesRes.json();
+      if (requestId !== latestDetailsRequest.current) return;
       if (Array.isArray(filesData)) {
         setPrFiles(filesData);
         if (filesData.length > 0) {
@@ -166,6 +213,7 @@ export function useDashboardData() {
 
       const findingsRes = await fetch(`/api/prs/${prId}/findings`);
       const findingsData = await findingsRes.json();
+      if (requestId !== latestDetailsRequest.current) return;
       if (findingsData && typeof findingsData === "object" && "findings" in findingsData) {
         setFindings(findingsData.findings);
         setReviewRun(findingsData.reviewRun ?? null);
@@ -294,19 +342,22 @@ export function useDashboardData() {
   // ===== PR scan =====
   const handleTriggerPrScan = async () => {
     if (!selectedPrId) return;
-    console.log(`[scan] handleTriggerPrScan: starting scan for prId=${selectedPrId}`);
+    const scanningPrId = selectedPrId;
+    const scanningRepoId = selectedRepoId;
+    console.log(`[scan] handleTriggerPrScan: starting scan for prId=${scanningPrId}`);
     setIsScanning(true);
     setScanResult(null);
+    setStale(false);
 
     setPrs((prev) =>
-      prev.map((p) => (p.id === selectedPrId ? { ...p, status: "In Progress" } : p)),
+      prev.map((p) => (p.id === scanningPrId ? { ...p, status: "In Progress" } : p)),
     );
 
-    const activeRepoName = repos.find((r) => r.id === selectedRepoId)?.name || selectedRepoId;
+    const activeRepoName = repos.find((r) => r.id === scanningRepoId)?.name || scanningRepoId;
 
     try {
-      console.log(`[scan] handleTriggerPrScan: POST /api/prs/${selectedPrId}/scan`);
-      const res = await fetch(`/api/prs/${selectedPrId}/scan`, {
+      console.log(`[scan] handleTriggerPrScan: POST /api/prs/${scanningPrId}/scan`);
+      const res = await fetch(`/api/prs/${scanningPrId}/scan`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -323,14 +374,16 @@ export function useDashboardData() {
           notice: result.systemWarn,
         });
         console.log(`[scan] handleTriggerPrScan: refetching PR details, PRs, repos, logs`);
-        await fetchPrDetails(selectedPrId);
-        if (selectedRepoId) await fetchPrsForSelectedRepo(selectedRepoId, true);
+        setSelectedRepoId(scanningRepoId);
+        setSelectedPrId(scanningPrId);
+        await fetchPrDetails(scanningPrId, false);
+        if (scanningRepoId) await fetchPrsForSelectedRepo(scanningRepoId, true);
         await fetchRepos();
         await fetchLogs();
         console.log(`[scan] handleTriggerPrScan: refetch complete`);
       } else if (res.status === 409 && result.error === "INDEX_REQUIRED") {
         setPrs((prev) =>
-          prev.map((p) => (p.id === selectedPrId ? { ...p, status: "Pending" } : p)),
+          prev.map((p) => (p.id === scanningPrId ? { ...p, status: "Pending" } : p)),
         );
         alert(
           result.message ||
@@ -338,14 +391,14 @@ export function useDashboardData() {
         );
       } else {
         setPrs((prev) =>
-          prev.map((p) => (p.id === selectedPrId ? { ...p, status: "Failed" } : p)),
+          prev.map((p) => (p.id === scanningPrId ? { ...p, status: "Failed" } : p)),
         );
         alert("Pipeline Scan Error: " + (result.error || "Execution timeout"));
       }
     } catch (e: any) {
       console.error("Scan dispatch crash", e);
       setPrs((prev) =>
-        prev.map((p) => (p.id === selectedPrId ? { ...p, status: "Failed" } : p)),
+        prev.map((p) => (p.id === scanningPrId ? { ...p, status: "Failed" } : p)),
       );
       alert("Pipeline Dispatch Crashed: " + e.message);
     } finally {
@@ -423,8 +476,8 @@ export function useDashboardData() {
 
   // ===== Markdown export =====
   const handleExportMarkdown = () => {
-    const activePr = prs.find((p) => p.id === selectedPrId);
     const activeRepo = repos.find((r) => r.id === selectedRepoId);
+    const activePr = prs.find((p) => p.id === selectedPrId && p.repoId === selectedRepoId);
     if (!activePr || !activeRepo) return;
 
     let mdContent = `# GrepLoop automated PR Code Review Summary Card\n\n`;

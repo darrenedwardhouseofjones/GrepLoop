@@ -154,11 +154,11 @@ export default function ReviewCard({ activePR, findings, reviewRun, rejectedCoun
           )}
           {stale && (
             <span
-              title="The PR diff has changed since this review ran. Re-scan to refresh."
+              title="The saved review no longer matches the current PR diff. Run the scan again to refresh it."
               className="flex items-center gap-1 px-2 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/25 text-[9px] font-mono font-bold uppercase"
             >
               <AlertTriangle size={10} />
-              <span>Stale</span>
+              <span>Review out of date</span>
             </span>
           )}
         </div>
@@ -191,9 +191,13 @@ export default function ReviewCard({ activePR, findings, reviewRun, rejectedCoun
       {findings.length === 0 ? (
         <div className="p-8 text-center text-slate-500 flex flex-col items-center justify-center">
           <CheckCircle2 size={24} className="text-emerald-400 mb-1.5" />
-          <p className="text-xs font-bold text-slate-300 font-mono">Status: Ready for review scan</p>
+          <p className="text-xs font-bold text-slate-300 font-mono">
+            {reviewRun ? "Review complete: no findings" : "Status: Ready for review scan"}
+          </p>
           <p className="text-[10px] text-slate-600 font-mono mt-0.5">
-            Click "Trigger AI Review Scan" to run real-time static checking.
+            {reviewRun
+              ? "This scan did not find any active alerts for the current report."
+              : "Click \"Trigger AI Review Scan\" to run real-time static checking."}
           </p>
         </div>
       ) : (

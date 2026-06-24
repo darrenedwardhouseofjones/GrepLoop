@@ -25,13 +25,16 @@ async function withChain(chain: any[]) {
   return loadFresh();
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   vi.resetModules();
   vi.doMock("../src/lib/llmClient", () => ({
     getChatClient: () => null,
     getChatModel: () => null,
     getEmbeddingChain: () => [],
   }));
+  // Reset the module-level circuit breaker between tests.
+  const { EmbeddingService } = await import("../src/services/embeddingService");
+  EmbeddingService.resetCircuitBreaker();
 });
 
 function fakeProvider(vec: number[], name = "fake"): any {
@@ -47,28 +50,50 @@ function fakeProvider(vec: number[], name = "fake"): any {
 }
 
 describe("embedding dimension guard", () => {
-  it("passes a 1536-dim vector through unchanged", async () => {
-    const EmbeddingService = await withChain([fakeProvider(new Array(1536).fill(0.1))]);
+  it("passes a 1024-dim vector through unchanged", async () => {
+    const EmbeddingService = await withChain([fakeProvider(new Array(1024).fill(0.1))]);
     const result = await EmbeddingService.generateEmbedding("hello");
-    expect(result.length).toBe(1536);
+    expect(result.length).toBe(1024);
     expect(result[0]).toBeCloseTo(0.1);
   });
 
-  it("returns [] when provider returns wrong dim (e.g. 1024)", async () => {
+  it("returns [] when provider returns wrong dim (e.g. 1536)", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const EmbeddingService = await withChain([fakeProvider(new Array(1024).fill(0.2))]);
+    const EmbeddingService = await withChain([fakeProvider(new Array(1536).fill(0.2))]);
     const result = await EmbeddingService.generateEmbedding("hello");
     expect(result).toEqual([]);
     expect(warn).toHaveBeenCalledWith(
-      expect.stringContaining("1024 dimensions"),
+      expect.stringContaining("1536 dimensions"),
     );
     warn.mockRestore();
   });
 
-  it("does NOT trip the circuit breaker on a dim mismatch (config issue, not outage)", async () => {
-    const EmbeddingService = await withChain([fakeProvider(new Array(768).fill(0.3))]);
-    await EmbeddingService.generateEmbedding("hello");
+  it("tries the fallback provider when the primary returns wrong dim", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const EmbeddingService = await withChain([
+      fakeProvider(new Array(768).fill(0.3), "primary"),
+      fakeProvider(new Array(1024).fill(0.4), "fallback"),
+    ]);
+    const result = await EmbeddingService.generateEmbedding("hello");
+    expect(result.length).toBe(1024);
+    expect(result[0]).toBeCloseTo(0.4);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("primary returned 768 dimensions"));
     expect(EmbeddingService.isCircuitOpen()).toBe(false);
+    warn.mockRestore();
+  });
+
+  it("trips the breaker when every provider returns wrong dim (no fallback rescue)", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const err = vi.spyOn(console, "error").mockImplementation(() => {});
+    const EmbeddingService = await withChain([
+      fakeProvider(new Array(768).fill(0.3), "primary"),
+      fakeProvider(new Array(1536).fill(0.5), "fallback"),
+    ]);
+    const result = await EmbeddingService.generateEmbedding("hello");
+    expect(result).toEqual([]);
+    expect(EmbeddingService.isCircuitOpen()).toBe(true);
+    warn.mockRestore();
+    err.mockRestore();
   });
 
   it("still trips the breaker when the provider actually throws", async () => {

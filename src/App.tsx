@@ -50,8 +50,8 @@ export default function App() {
     }
   }, [d.lastRegisteredRepo]);
 
-  const activeAPR = d.prs.find((p) => p.id === d.selectedPrId);
   const activeRepo = d.repos.find((r) => r.id === d.selectedRepoId);
+  const activeAPR = d.prs.find((p) => p.id === d.selectedPrId && p.repoId === d.selectedRepoId);
   const activeFile = d.prFiles.find((f) => f.filename === d.selectedFilename) || d.prFiles[0];
 
   return (

@@ -34,39 +34,54 @@ export default function ReviewProgress({ prId, isScanning }: Props) {
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const bottomRef = useRef<HTMLDivElement>(null);
   const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const logSignatureRef = useRef("");
+  const logCountRef = useRef(0);
 
   useEffect(() => {
     if (!prId || !isScanning) {
       setLogs([]);
+      logSignatureRef.current = "";
+      logCountRef.current = 0;
       return;
     }
 
+    let cancelled = false;
     setLogs([]);
+    logSignatureRef.current = "";
+    logCountRef.current = 0;
 
     const poll = async () => {
       try {
         const res = await fetch(`/api/reviews/log?prId=${prId}`);
-        if (res.ok) {
-          setLogs(await res.json());
+        if (!cancelled && res.ok) {
+          const nextLogs: LogEntry[] = await res.json();
+          const signature = nextLogs.map((log) => `${log.id}:${log.level}`).join("|");
+          if (signature !== logSignatureRef.current) {
+            logSignatureRef.current = signature;
+            setLogs(nextLogs);
+          }
         }
       } catch {
         // ignore polling errors
       }
+      if (cancelled) return;
       pollRef.current = setTimeout(poll, 2000);
     };
 
     poll();
 
     return () => {
+      cancelled = true;
       if (pollRef.current) clearTimeout(pollRef.current);
     };
   }, [prId, isScanning]);
 
   useEffect(() => {
-    if (expanded) {
-      bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    if (expanded && logs.length > logCountRef.current) {
+      bottomRef.current?.scrollIntoView({ block: "nearest" });
     }
-  }, [logs, expanded]);
+    logCountRef.current = logs.length;
+  }, [logs.length, expanded]);
 
   if (!isScanning || !prId) return null;
 

@@ -74,7 +74,7 @@ BugHunter is deployed inside infrastructure you control. Four modes, picked per-
 A common assumption is that "self-hosted" implies running frontier models locally. In practice, the two roles have very different hardware requirements:
 
 - **Chat / review role.** Frontier models (Claude Sonnet, GPT-4-class, GLM-5.2, MiniMax-M3) need serious hardware to run locally at review-grade speed — a high-end GPU or a workstation like NVIDIA's DGX Spark. Most users don't have that. For these users, the chat role should hit a cloud endpoint (OpenRouter, Anthropic, OpenAI). The cost is per-diff, typically cents to low dollars per PR.
-- **Embedding role.** Embedding models (`nomic-embed-text`, `bge-small`, etc.) are small and CPU-friendly. They run fine locally even on modest hardware. Recommended default: local Ollama for embeddings regardless of where chat runs.
+- **Embedding role.** Embedding models are much smaller than chat models and can often run locally on modest hardware. For the current schema, the selected embedding model must return 1536 dimensions to match `symbols.embedding vector(1536)`. Local embeddings are still preferred when a compatible model is available.
 
 **The hybrid (Mode 2 in §4) is the practical default for most users:** local repo, local embeddings, cloud LLM for the review itself. Code stays on disk; only the diff and retrieved context leave for the LLM provider; the cost curve is your actual LLM usage. This is fully supported by `src/lib/llmClient.ts` — chat and embedding roles are configured independently via `.greploop/llm-presets.json`.
 
@@ -472,7 +472,7 @@ For single-model reviews (the current default), one `ReviewPass` is created per 
 - **Counter-evidence verifier storage.** Short term: store verifier status/counter-evidence inside `ReviewFinding.evidenceChain` JSON. Longer term: add explicit columns (`verificationStatus`, `counterEvidence`, `assumptions`) once the shape stabilizes.
 - **Ensemble reconciliation strategy.** Average ratings? Take the median? Surface the spread and let humans decide? Default should be "surface the spread" — averaging hides the most interesting signal. Needs empirical tuning once the feature ships.
 - **Cost escalation policy.** When ensembling, do all N models run on every PR, or does a cheap model run first and expensive models only escalate on disagreement/low-rating? Likely the latter for cost, but worth measuring.
-- **Embedding model for local backend.** `nomic-embed-text` is the current best local embedding model for code. Fast-moving space; re-evaluate at build time.
+- **Embedding model for local backend.** The schema currently locks embeddings to 1536 dimensions. Pick a local model only if it returns 1536-dimensional vectors, or use a compatible cloud embedding preset. Fast-moving space; re-evaluate at build time.
 - **Max agent iterations.** Default of 8 is a guess. Needs empirical validation — too low and the agent stops before following an important lead; too high and runaway loops on deeply connected codebases cost too much on cloud backends.
 - **Per-user vs per-install LLM API keys.** MVP is per-install (one config). Per-user keys (BYO OpenRouter key) is a Phase 2 candidate if multi-user lands.
 

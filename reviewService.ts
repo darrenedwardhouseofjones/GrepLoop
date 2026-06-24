@@ -24,6 +24,17 @@ async function logReview(prId: string, message: string, level: string = "info") 
   }
 }
 
+async function assertReviewRunStillActive(reviewRunId?: string): Promise<void> {
+  if (!reviewRunId) return;
+  const run = await prisma.reviewRun.findUnique({
+    where: { id: reviewRunId },
+    select: { status: true },
+  });
+  if (run && run.status !== "in_progress") {
+    throw new Error(`Review run is no longer active (status: ${run.status}).`);
+  }
+}
+
 /**
  * The responseSchema is reused as the parameters for the submitReview tool
  * (model returns its final review by calling the tool with the full
@@ -105,6 +116,51 @@ const reviewResponseSchema = {
  *  findings and mismatches the header count. */
 const VALID_CATEGORIES = ["Correctness", "Security", "Performance", "Accessibility", "Style"];
 const VALID_SEVERITIES = ["blocker", "warning", "suggestion"];
+const LLM_CALL_TIMEOUT_MS = 120_000;
+
+async function withTimeout<T>(promise: Promise<T>, label: string): Promise<T> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeout = setTimeout(() => {
+      reject(new Error(`${label} timed out after ${Math.round(LLM_CALL_TIMEOUT_MS / 1000)}s`));
+    }, LLM_CALL_TIMEOUT_MS);
+  });
+  try {
+    return await Promise.race([promise, timeoutPromise]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
+}
+
+function normalizeFinalReview(candidate: any): any | null {
+  if (!candidate || typeof candidate !== "object") return null;
+  if (typeof candidate.rating !== "number") return null;
+  if (!Array.isArray(candidate.findings)) return null;
+  return {
+    rating: candidate.rating,
+    summary: typeof candidate.summary === "string" ? candidate.summary : "",
+    findings: candidate.findings,
+  };
+}
+
+function parseFinalReviewJson(rawText: string): any | null {
+  const trimmed = rawText.trim();
+  if (!trimmed) return null;
+  const candidates = [trimmed];
+  const match = trimmed.match(/\{[\s\S]*\}/);
+  if (match && match[0] !== trimmed) candidates.push(match[0]);
+
+  for (const candidate of candidates) {
+    try {
+      const parsed = JSON.parse(candidate);
+      const normalized = normalizeFinalReview(parsed);
+      if (normalized) return normalized;
+    } catch {
+      // Try the next candidate.
+    }
+  }
+  return null;
+}
 
 const tools = [
   {
@@ -351,16 +407,20 @@ ${diffPayload}`;
           loopCount++;
           console.log(`[review] iteration ${loopCount}/8 provider=${name}`);
           void logReview(prId, `Iteration ${loopCount}/8 — ${name}`, "info");
-          const response = await client.chat.completions.create({
-            model,
-            messages,
-            tools,
-            tool_choice: "auto",
-            temperature: 0.2,
-            // 4096 is the maximum output tokens for GPT-4o and many other models.
-            // Exceeding this causes immediate 400 errors from OpenRouter.
-            max_tokens: 4096,
-          });
+          const response = await withTimeout(
+            client.chat.completions.create({
+              model,
+              messages,
+              tools,
+              tool_choice: "auto",
+              temperature: 0.2,
+              // 4096 is the maximum output tokens for GPT-4o and many other models.
+              // Exceeding this causes immediate 400 errors from OpenRouter.
+              max_tokens: 4096,
+            }),
+            `${name} chat completion`,
+          );
+          await assertReviewRunStillActive(reviewRunId);
 
           const msg = response.choices?.[0]?.message;
           if (!msg) break;
@@ -387,11 +447,21 @@ ${diffPayload}`;
               }
 
               if (fnName === "submitReview") {
+                const normalized = normalizeFinalReview(fnArgs);
+                if (!normalized) {
+                  console.warn(`[review] submitReview had invalid shape provider=${name}`);
+                  messages.push({
+                    role: "tool",
+                    tool_call_id: call.id,
+                    content: "Error: submitReview arguments must include numeric rating and findings array. Call submitReview again with the required shape.",
+                  });
+                  continue;
+                }
                 console.log(
-                  `[review] submitReview received: rating=${fnArgs.rating} findings=${fnArgs.findings?.length ?? 0} provider=${name}`,
+                  `[review] submitReview received: rating=${normalized.rating} findings=${normalized.findings?.length ?? 0} provider=${name}`,
                 );
-                void logReview(prId, `submitReview: rating=${fnArgs.rating}, ${fnArgs.findings?.length ?? 0} findings`, "info");
-                finalReview = fnArgs;
+                void logReview(prId, `submitReview: rating=${normalized.rating}, ${normalized.findings?.length ?? 0} findings`, "info");
+                finalReview = normalized;
                 break;
               }
 
@@ -477,20 +547,65 @@ ${diffPayload}`;
             // No tool call — model returned text (some endpoints/models don't
             // support function calling). Try to parse the body as JSON.
             const rawText = msg.content?.trim() || "{}";
-            try {
-              const match = rawText.match(/\{[\s\S]*\}/);
-              const cleanJson = match ? match[0] : rawText;
-              const parsed = JSON.parse(cleanJson);
-              if (parsed.rating && parsed.findings) {
-                console.log(
-                  `[review] parsed JSON finalReview without submitReview: rating=${parsed.rating} findings=${parsed.findings.length} provider=${name}`,
-                );
-                finalReview = parsed;
-              }
-            } catch {
-              // not JSON — give up on this scan path
+            const parsed = parseFinalReviewJson(rawText);
+            if (parsed) {
+              console.log(
+                `[review] parsed JSON finalReview without submitReview: rating=${parsed.rating} findings=${parsed.findings.length} provider=${name}`,
+              );
+              finalReview = parsed;
             }
             break;
+          }
+        }
+
+        if (!finalReview) {
+          await assertReviewRunStillActive(reviewRunId);
+          console.log(`[review] attempting JSON-only finalization provider=${name}`);
+          void logReview(prId, `Attempting JSON-only finalization — ${name}`, "info");
+          const finalizerMessages = [
+            ...messages,
+            {
+              role: "user",
+              content:
+                "You did not submit the review. Return ONLY a valid JSON object now with this exact shape: " +
+                "{\"rating\": number from 1 to 10, \"summary\": string, \"findings\": array}. " +
+                "If there are no issues, use findings: [] and a production-ready rating.",
+            },
+          ];
+          let finalizerResponse;
+          try {
+            finalizerResponse = await withTimeout(
+              client.chat.completions.create({
+                model,
+                messages: finalizerMessages,
+                temperature: 0.1,
+                max_tokens: 4096,
+                response_format: { type: "json_object" },
+              } as any),
+              `${name} JSON finalizer`,
+            );
+          } catch (err: any) {
+            console.warn(`[review] JSON response_format finalizer failed provider=${name}: ${err.message}`);
+            void logReview(prId, `JSON response_format finalizer failed: ${err.message}`, "warn");
+            finalizerResponse = await withTimeout(
+              client.chat.completions.create({
+                model,
+                messages: finalizerMessages,
+                temperature: 0.1,
+                max_tokens: 4096,
+              }),
+              `${name} fallback finalizer`,
+            );
+          }
+          await assertReviewRunStillActive(reviewRunId);
+          const rawFinalizerText = finalizerResponse.choices?.[0]?.message?.content || "";
+          const parsed = parseFinalReviewJson(rawFinalizerText);
+          if (parsed) {
+            console.log(
+              `[review] JSON-only finalReview received: rating=${parsed.rating} findings=${parsed.findings.length} provider=${name}`,
+            );
+            void logReview(prId, `JSON finalReview: rating=${parsed.rating}, ${parsed.findings.length} findings`, "info");
+            finalReview = parsed;
           }
         }
 
@@ -532,6 +647,11 @@ ${diffPayload}`;
       systemWarn = `Model ${usedModel} ended the agentic loop without calling submitReview. Check that the model supports tool calling, or pick a different model in LLM Settings.`;
     }
   }
+
+  if (!finalReview) {
+    throw new Error(systemWarn || "The review model did not return a structured rating/findings result.");
+  }
+  await assertReviewRunStillActive(reviewRunId);
 
   // 6. Persist findings
   console.log(`[scan] runPrScan: persisting ${findings.length} findings`);
@@ -627,7 +747,7 @@ ${diffPayload}`;
     console.error(`[scan] runPrScan: fatal error`, err);
     await prisma.pullRequest.updateMany({ where: { id: prId }, data: { status: "Failed" } });
     if (reviewRunId) {
-      void completeReviewRun(reviewRunId, { status: "failed" });
+      await completeReviewRun(reviewRunId, { status: "failed" });
     }
     throw err;
   }
