@@ -8,8 +8,7 @@
  *   indexOrchestrator.ts  — IndexingService class (orchestrates a run)
  *   graphBuilder.ts       — resolves raw calls → edge rows
  *   incrementalUpdater.ts — file diff against existing rows
- *   legacyRegexParser.ts  — TEMPORARY (deleted in Phase 7 of tree-sitter spec)
- *   tsParser.ts           — tree-sitter parser (lands in Phase 5)
+ *   tsParser.ts           — tree-sitter TS/JS parser (.ts/.tsx/.js/.jsx)
  */
 
 export { IndexingService } from "./indexOrchestrator";
