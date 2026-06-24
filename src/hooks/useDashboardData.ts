@@ -282,7 +282,10 @@ export function useDashboardData() {
           fetchRepos(),
           fetchLogs(),
           repoIdRef.current ? fetchPrsForSelectedRepo(repoIdRef.current, true) : Promise.resolve(),
-          prIdRef.current ? fetchPrDetails(prIdRef.current) : Promise.resolve(),
+          // clearBeforeLoad=false: keep the previous findings visible while
+          // the refetch is in flight. Otherwise the report flashes empty every
+          // 15s, making it impossible to copy from mid-render.
+          prIdRef.current ? fetchPrDetails(prIdRef.current, false) : Promise.resolve(),
         ]);
       } finally {
         pollInFlight.current = false;
@@ -471,7 +474,9 @@ export function useDashboardData() {
     fetchRepos();
     fetchLogs();
     if (selectedRepoId) fetchPrsForSelectedRepo(selectedRepoId, true);
-    if (selectedPrId) fetchPrDetails(selectedPrId);
+    // clearBeforeLoad=false: same reason as the background poller — don't
+    // wipe the report during the refetch window.
+    if (selectedPrId) fetchPrDetails(selectedPrId, false);
   };
 
   // ===== Markdown export =====
