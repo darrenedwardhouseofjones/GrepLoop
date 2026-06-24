@@ -49,12 +49,13 @@ export type SlotId =
 export type SlotState = Record<SlotId, string>;
 
 /**
- * Local working copy of a preset. Differs from LlmPresetView by carrying
- * apiKey as free-text (empty string when the user hasn't typed a new key —
- * server preserves the stored value in that case).
+ * Local working copy of a preset. Carries the real apiKey (populated from
+ * the server on load) plus ephemeral UI state (models cache, fetch status,
+ * eye toggle) that never round-trips through the API.
  *
- * Also tracks ephemeral UI state (models cache, fetch status, eye toggle)
- * that never round-trips through the API.
+ * showApiKey toggles password vs plain-text display of the field value.
+ * The server is source of truth and the route is session-gated, so the key
+ * is no longer masked in transit — the eye is only to defeat shoulder-surfers.
  */
 export interface WorkingPreset {
   id: string;
@@ -109,7 +110,7 @@ export function fromViewState(data: LlmPresetsState): {
       id: p.id,
       name: p.name,
       endpoint: p.endpoint,
-      apiKey: "",
+      apiKey: p.apiKey || "",
       hasApiKey: p.hasApiKey,
       chatModel: p.chatModel,
       embeddingModel: p.embeddingModel,

@@ -40,6 +40,7 @@ export interface PresetView {
   id: string;
   name: string;
   endpoint: string;
+  apiKey: string;
   hasApiKey: boolean;
   chatModel: string;
   embeddingModel: string;
@@ -201,6 +202,7 @@ function toView(p: Preset): PresetView {
     id: p.id,
     name: p.name,
     endpoint: p.endpoint,
+    apiKey: p.apiKey,
     hasApiKey: Boolean(p.apiKey),
     chatModel: p.chatModel,
     embeddingModel: p.embeddingModel,
@@ -208,7 +210,11 @@ function toView(p: Preset): PresetView {
 }
 
 /**
- * Returns the full state with apiKeys masked. Safe to return to the client.
+ * Returns the full state with apiKeys visible. The route is already
+ * session-gated, and this is a single-user self-hosted app where the
+ * operator already owns `.greploop/llm-presets.json` on disk — masking
+ * the key in transit only added UX friction (no way to verify/copy the
+ * stored value without opening the file).
  *
  * For backward compat with older UI clients, also exposes the legacy
  * `activeChatPresetId`/`activeEmbeddingPresetId` keys mirroring the

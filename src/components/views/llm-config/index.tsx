@@ -169,13 +169,6 @@ export default function LlmConfigTabs() {
           success: true,
           message: "Saved. Changes take effect on the next request — no restart needed.",
         });
-        setPresets((prev) =>
-          prev.map((p) => ({
-            ...p,
-            apiKey: "",
-            hasApiKey: p.apiKey ? true : p.hasApiKey,
-          })),
-        );
         setDirty(false);
         if (typeof window !== "undefined") {
           window.dispatchEvent(new Event(LLM_PRESETS_CHANGED_EVENT));
@@ -365,7 +358,7 @@ function ExplanatoryCard() {
           <strong className="text-slate-300">No restart:</strong> changes take effect on the next request. Keys are stored in <code>.greploop/llm-presets.json</code> with mode 0600.
         </li>
         <li>
-          <strong className="text-slate-300">API key masking:</strong> once saved, the key is never sent back to the browser. Leave the field blank on save to keep the stored value.
+          <strong className="text-slate-300">Visible keys:</strong> the actual key is loaded back into the field on every page load. Click the eye to reveal it in plain text — useful for confirming you pasted the right one or for copying into a CLI. The route is session-gated, so this is a usability tradeoff, not a security regression.
         </li>
       </ul>
       <div className="text-[11px] text-amber-500/85 bg-amber-500/[0.02] border border-amber-500/10 p-3 rounded-lg flex items-start gap-2">

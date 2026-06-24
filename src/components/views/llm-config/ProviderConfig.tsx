@@ -7,9 +7,9 @@ import { DEFAULT_ENDPOINT, type WorkingPreset } from "./shared";
  * Provider-level config: name, endpoint, api key, and a Fetch Models
  * button that pulls the catalog from the upstream /v1/models endpoint.
  *
- * The eye toggle reveals the apiKey field. The "Stored — leave blank to
- * keep" badge is shown when the server already has a key for this preset
- * and the user hasn't typed a new one.
+ * The apiKey field shows the actual stored key (masked as password by
+ * default). Click the eye to reveal it in plain text. Local endpoints
+ * (Ollama, LM Studio) leave the field blank.
  */
 export default function ProviderConfig({
   preset,
@@ -43,32 +43,15 @@ export default function ProviderConfig({
           />
         </FieldLabel>
 
-        <FieldLabel
-          label="API Key"
-          trailing={
-            preset.hasApiKey ? (
-              <span className="text-[9px] text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/20 normal-case">
-                ✓ Stored securely (hidden — type to replace)
-              </span>
-            ) : null
-          }
-        >
+        <FieldLabel label="API Key">
           <div className="relative">
             <input
               type={preset.showApiKey ? "text" : "password"}
               value={preset.apiKey}
               onChange={(e) => onUpdate({ apiKey: e.target.value })}
-              placeholder={
-                preset.hasApiKey
-                  ? "Key is stored — type a new one here to replace it"
-                  : "Paste key (blank for local endpoints)"
-              }
+              placeholder="Paste key (blank for local endpoints)"
               autoComplete="off"
-              className={`w-full bg-slate-900 border rounded-lg px-3 py-2 pr-10 text-xs text-slate-100 font-mono outline-none ${
-                preset.hasApiKey && !preset.apiKey
-                  ? "border-emerald-500/30 focus:border-cyan-500"
-                  : "border-white/10 focus:border-cyan-500"
-              }`}
+              className="w-full bg-slate-900 border border-white/10 rounded-lg px-3 py-2 pr-10 text-xs text-slate-100 font-mono focus:border-cyan-500 outline-none"
             />
             <button
               type="button"
@@ -113,18 +96,15 @@ export default function ProviderConfig({
 
 function FieldLabel({
   label,
-  trailing,
   children,
 }: {
   label: string;
-  trailing?: React.ReactNode;
   children: React.ReactNode;
 }) {
   return (
     <div className="space-y-1.5">
-      <label className="text-[10px] uppercase font-mono text-slate-400 flex items-center gap-2">
-        <span>{label}</span>
-        {trailing}
+      <label className="text-[10px] uppercase font-mono text-slate-400">
+        {label}
       </label>
       {children}
     </div>

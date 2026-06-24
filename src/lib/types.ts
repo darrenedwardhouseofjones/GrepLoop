@@ -91,6 +91,7 @@ export interface LlmPresetView {
   id: string;
   name: string;
   endpoint: string;
+  apiKey: string;
   hasApiKey: boolean;
   chatModel: string;
   embeddingModel: string;
