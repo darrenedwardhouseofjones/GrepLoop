@@ -40,7 +40,7 @@ while read local_ref local_sha remote_ref remote_sha; do
   result=$(curl -s -m 300 "$GREPLOOP_URL/api/hooks/prepush" \
     -H "Content-Type: application/json" \
     -H "Authorization: Bearer $GREPLOOP_API_KEY" \
-    -d "{\"branch\":\"$branch\",\"repoPath\":\"$REPO_PATH\",\"sha\":\"$local_sha\"")
+    -d "{\"branch\":\"$branch\",\"repoPath\":\"$REPO_PATH\",\"sha\":\"$local_sha\"}")
 
   passed=$(echo "$result" | grep -o '"passed":[^,}]*' | cut -d: -f2)
   rating=$(echo "$result" | grep -o '"rating":[^,}]*' | cut -d: -f2)

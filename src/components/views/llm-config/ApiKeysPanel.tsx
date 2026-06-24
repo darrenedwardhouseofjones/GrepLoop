@@ -54,7 +54,7 @@ function InstallModal({ tool, origin, apiKey, repoId, onClose }: { tool: ToolId;
   };
 
   const key = apiKey;
-  const baseUrl = repoId ? `${origin}/api/mcp/command/${repoId}` : `${origin}/api/mcp/command`;
+  const baseUrl = repoId ? `${origin}/api/command/${repoId}` : `${origin}/api/command`;
 
   interface CmdSection { label: string; command: string; }
   const sections: Record<ToolId, { title: string; steps: CmdSection[] }> = {
@@ -62,12 +62,12 @@ function InstallModal({ tool, origin, apiKey, repoId, onClose }: { tool: ToolId;
       title: "Claude Code",
       steps: [
         {
-          label: "Install MCP server (global)",
-          command: `claude mcp add --scope global --transport http bughunter ${baseUrl} --header "Authorization: Bearer ${key}"`,
+          label: "Install the GrepLoop /gloop skill (run from the GrepLoop repo root)",
+          command: `cp -r skills/gloop ~/.claude/skills/`,
         },
         {
-          label: "Install Gloop skill (also works in OpenCode)",
-          command: `cp -r skills/gloop ~/.claude/skills/`,
+          label: "Set your API key (used by the skill, CLI, and pre-push hook)",
+          command: `export GREPLOOP_API_KEY='${key}'`,
         },
       ],
     },
@@ -75,8 +75,8 @@ function InstallModal({ tool, origin, apiKey, repoId, onClose }: { tool: ToolId;
       title: "Cursor",
       steps: [
         {
-          label: "Install MCP server (global)",
-          command: `mkdir -p ~/.cursor && (jq '.mcpServers.bughunter = {"type":"http","url":"${baseUrl}","headers":{"Authorization":"Bearer ${key}"}}' ~/.cursor/mcp.json 2>/dev/null || echo '{"mcpServers":{"bughunter":{"type":"http","url":"${baseUrl}","headers":{"Authorization":"Bearer ${key}"}}}}') > /tmp/_cursor.json && mv /tmp/_cursor.json ~/.cursor/mcp.json`,
+          label: "Cursor has no agent-skill system \u2014 call the GrepLoop API directly",
+          command: `curl -s ${baseUrl} -H "Authorization: Bearer ${key}" -H "Content-Type: application/json" -d '{"command":"prlist"}'`,
         },
       ],
     },
@@ -84,12 +84,12 @@ function InstallModal({ tool, origin, apiKey, repoId, onClose }: { tool: ToolId;
       title: "OpenCode",
       steps: [
         {
-          label: "Install MCP server in this project (scoped to this repo) + slash commands",
-          command: `(jq '.mcp.bughunter = {"type":"remote","url":"${baseUrl}","headers":{"Authorization":"Bearer ${key}"}} | .command.prs = {"description":"List pull requests for this repo","template":"Use the bughunter prlist tool to list all PRs for the current repo. If there are no PRs registered, say so."} | .command.prcheck = {"description":"Review a PR (/prcheck <number>)","template":"Use the bughunter prcheck tool to review PR #$ARGUMENTS. Show me the rating and any findings."} | .command.prcheckstatus = {"description":"Check review status (/prcheckstatus <branch>)","template":"Use the bughunter prcheckstatus tool with branch=$ARGUMENTS. Show the current status and findings."} | .command.bugfixer = {"description":"Auto-fix loop: review → fix → re-review until 8/10 (/bugfixer <number>)","template":"Use the bughunter prcheck tool to review PR #$1. If rating >= 8/10, report PASS. Otherwise fix each finding (read the file, apply the fix, commit with '"'"'fix: address review findings'"'"'), then tell me to run /bugfixer $1 again for re-review. Loop until 8/10."}' ./opencode.json 2>/dev/null || echo '{"$schema":"https://opencode.ai/config.json","mcp":{"bughunter":{"type":"remote","url":"${baseUrl}","headers":{"Authorization":"Bearer ${key}"}}},"command":{"prs":{"description":"List pull requests for this repo","template":"Use the bughunter prlist tool to list all PRs for the current repo. If there are no PRs registered, say so."},"prcheck":{"description":"Review a PR (/prcheck <number>)","template":"Use the bughunter prcheck tool to review PR #$ARGUMENTS. Show me the rating and any findings."},"prcheckstatus":{"description":"Check review status (/prcheckstatus <branch>)","template":"Use the bughunter prcheckstatus tool with branch=$ARGUMENTS. Show the current status and findings."},"bugfixer":{"description":"Auto-fix loop: review → fix → re-review until 8/10 (/bugfixer <number>)","template":"Use the bughunter prcheck tool to review PR #$1. If rating >= 8/10, report PASS. Otherwise fix each finding (read the file, apply the fix, commit with '"'"'fix: address review findings'"'"'), then tell me to run /bugfixer $1 again for re-review. Loop until 8/10."}}}') > /tmp/_ocproj.json && mv /tmp/_ocproj.json ./opencode.json`,
+          label: "Install the GrepLoop /gloop skill (OpenCode reads ~/.claude/skills)",
+          command: `cp -r skills/gloop ~/.claude/skills/`,
         },
         {
-          label: "Install MCP server globally (auto-detects repo from CWD via webfetch)",
-          command: `mkdir -p ~/.config/opencode && (jq '.mcp.bughunter = {"type":"remote","url":"${origin}/api/mcp/command","headers":{"Authorization":"Bearer ${key}"}} | .command.prs = {"description":"List pull requests for this repo","template":"First, detect whether this project is registered as a GrepLoop repository: use a web fetch to call ` + "`${origin}/api/repos/resolve?dir=<pwd-url-encoded>`" + ` with the current directory path to resolve the repo ID. If it returns null, say \"This project is not registered in GrepLoop.\" Otherwise, use the bughunter prlist tool to list all PRs for the current repo."} | .command.prcheck = {"description":"Review a PR (/prcheck <number> or <branch>)","template":"First, detect whether this project is registered as a GrepLoop repository: use a web fetch to call ` + "`${origin}/api/repos/resolve?dir=<pwd-url-encoded>`" + ` with the current directory path to resolve the repo ID. If it returns null, say \"This project is not registered in GrepLoop.\" Otherwise, use the bughunter prcheck tool to review PR #$ARGUMENTS. Show me the rating and any findings."} | .command.prcheckstatus = {"description":"Check review status (/prcheckstatus <branch>)","template":"First, detect whether this project is registered as a GrepLoop repository: use a web fetch to call ` + "`${origin}/api/repos/resolve?dir=<pwd-url-encoded>`" + ` with the current directory path to resolve the repo ID. If it returns null, say \"This project is not registered in GrepLoop.\" Otherwise, use the bughunter prcheckstatus tool with branch=$ARGUMENTS to check the status."} | .command.bugfixer = {"description":"Auto-fix loop: review → fix → re-review until 8/10 (/bugfixer <number>)","template":"First, detect whether this project is registered as a GrepLoop repository: use a web fetch to call ` + "`${origin}/api/repos/resolve?dir=<pwd-url-encoded>`" + ` with the current directory path to resolve the repo ID. If it returns null, say \"This project is not registered in GrepLoop.\" Otherwise, use the bughunter prcheck tool to review PR #$1. If rating >= 8/10, report PASS. Otherwise fix each finding (read the file, apply the fix, commit with '"'"'fix: address review findings'"'"'), then tell me to run /bugfixer $1 again for re-review. Loop until 8/10."}' ~/.config/opencode/opencode.json 2>/dev/null || echo '{"$schema":"https://opencode.ai/config.json","mcp":{"bughunter":{"type":"remote","url":"${origin}/api/mcp/command","headers":{"Authorization":"Bearer ${key}"}}},"command":{"prs":{"description":"List pull requests for this repo","template":"First, detect whether this project is registered as a GrepLoop repository: use a web fetch to call ` + "`${origin}/api/repos/resolve?dir=<pwd-url-encoded>`" + ` with the current directory path to resolve the repo ID. If it returns null, say \"This project is not registered in GrepLoop.\" Otherwise, use the bughunter prlist tool to list all PRs for the current repo."},"prcheck":{"description":"Review a PR (/prcheck <number> or <branch>)","template":"First, detect whether this project is registered as a GrepLoop repository: use a web fetch to call ` + "`${origin}/api/repos/resolve?dir=<pwd-url-encoded>`" + ` with the current directory path to resolve the repo ID. If it returns null, say \"This project is not registered in GrepLoop.\" Otherwise, use the bughunter prcheck tool to review PR #$ARGUMENTS. Show me the rating and any findings."},"prcheckstatus":{"description":"Check review status (/prcheckstatus <branch>)","template":"First, detect whether this project is registered as a GrepLoop repository: use a web fetch to call ` + "`${origin}/api/repos/resolve?dir=<pwd-url-encoded>`" + ` with the current directory path to resolve the repo ID. If it returns null, say \"This project is not registered in GrepLoop.\" Otherwise, use the bughunter prcheckstatus tool with branch=$ARGUMENTS to check the status."},"bugfixer":{"description":"Auto-fix loop: review → fix → re-review until 8/10 (/bugfixer <number>)","template":"First, detect whether this project is registered as a GrepLoop repository: use a web fetch to call ` + "`${origin}/api/repos/resolve?dir=<pwd-url-encoded>`" + ` with the current directory path to resolve the repo ID. If it returns null, say \"This project is not registered in GrepLoop.\" Otherwise, use the bughunter prcheck tool to review PR #$1. If rating >= 8/10, report PASS. Otherwise fix each finding (read the file, apply the fix, commit with '"'"'fix: address review findings'"'"'), then tell me to run /bugfixer $1 again for re-review. Loop until 8/10."}}}') > /tmp/_oc.json && mv /tmp/_oc.json ~/.config/opencode/opencode.json`,
+          label: "Set your API key (used by the skill, CLI, and pre-push hook)",
+          command: `export GREPLOOP_API_KEY='${key}'`,
         },
       ],
     },
@@ -97,8 +97,8 @@ function InstallModal({ tool, origin, apiKey, repoId, onClose }: { tool: ToolId;
       title: "Codex",
       steps: [
         {
-          label: "Install MCP server",
-          command: `GREPLOOP_API_KEY='${key}' codex mcp add bughunter --url ${baseUrl} --bearer-token-env-var GREPLOOP_API_KEY`,
+          label: "Codex has no agent-skill system — call the GrepLoop API directly",
+          command: `curl -s ${baseUrl} -H "Authorization: Bearer ${key}" -H "Content-Type: application/json" -d '{"command":"prlist"}'`,
         },
       ],
     },
@@ -169,7 +169,7 @@ export default function ApiKeysPanel() {
 
   const fetchKeys = async () => {
     try {
-      const res = await fetch("/api/mcp/keys");
+      const res = await fetch("/api/keys");
       if (res.ok) setKeys(await res.json());
     } catch { /* ignore */ }
   };
@@ -190,13 +190,13 @@ export default function ApiKeysPanel() {
     setError(null);
     setNewKeyValue(null);
     try {
-      const existing = await (await fetch("/api/mcp/keys")).json();
+      const existing = await (await fetch("/api/keys")).json();
       await Promise.all(
         (existing as { id: string }[]).map((k) =>
-          fetch(`/api/mcp/keys/${k.id}`, { method: "DELETE" })
+          fetch(`/api/keys/${k.id}`, { method: "DELETE" })
         )
       );
-      const res = await fetch("/api/mcp/keys", {
+      const res = await fetch("/api/keys", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name: newKeyName || "GrepLoop API Key" }),
@@ -218,7 +218,7 @@ export default function ApiKeysPanel() {
 
   const handleRevoke = async (id: string) => {
     try {
-      await fetch(`/api/mcp/keys/${id}`, { method: "DELETE" });
+      await fetch(`/api/keys/${id}`, { method: "DELETE" });
       await fetchKeys();
     } catch { /* ignore */ }
   };
@@ -360,7 +360,7 @@ export default function ApiKeysPanel() {
             </select>
             {selectedRepo && (
               <p className="text-[9px] text-slate-500 font-mono mt-1">
-                Install commands will be scoped to this repo. <code className="text-cyan-400">/prcheck 5</code> will use this repo automatically.
+                Install commands will be scoped to this repo. <code className="text-cyan-400">/gloop 5</code> will use this repo automatically.
               </p>
             )}
           </div>
@@ -377,13 +377,13 @@ export default function ApiKeysPanel() {
                   if (hasKey) { setActiveTool(t.id); return; }
                   setCreating(true);
                   try {
-                    const existing = await (await fetch("/api/mcp/keys")).json();
+                    const existing = await (await fetch("/api/keys")).json();
                     await Promise.all(
                       (existing as { id: string }[]).map((k) =>
-                        fetch(`/api/mcp/keys/${k.id}`, { method: "DELETE" })
+                        fetch(`/api/keys/${k.id}`, { method: "DELETE" })
                       )
                     );
-                    const res = await fetch("/api/mcp/keys", {
+                    const res = await fetch("/api/keys", {
                       method: "POST",
                       headers: { "Content-Type": "application/json" },
                       body: JSON.stringify({ name: "GrepLoop API Key" }),

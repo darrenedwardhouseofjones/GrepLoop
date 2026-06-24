@@ -1,8 +1,14 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/src/lib/prisma";
 import { generateApiKey } from "@/src/lib/apiAuth";
+import { requireSession } from "@/src/lib/api-auth";
 
-export async function GET() {
+export async function GET(req: Request) {
+  try {
+    await requireSession(req);
+  } catch {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
   const keys = await prisma.mcpApiKey.findMany({
     orderBy: { createdAt: "desc" },
     select: { id: true, name: true, prefix: true, createdAt: true, lastUsedAt: true, revoked: true },
@@ -11,6 +17,11 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
+  try {
+    await requireSession(req);
+  } catch {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
   const body = await req.json().catch(() => ({}));
   const name = body.name?.trim();
   if (!name) {

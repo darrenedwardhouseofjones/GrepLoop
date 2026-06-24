@@ -72,7 +72,7 @@ Requires `GREPLOOP_API_KEY` env var (generate from UI sidebar → LLM Settings �
 
 ## API keys
 
-All authenticated endpoints (`/api/mcp/*`, `/api/hooks/prepush`) require an API key via the `Authorization: Bearer <key>` header. Keys are generated from the UI sidebar → LLM Settings → "API Keys" tab. New keys use the `gl_` prefix; legacy `gl_mcp_` keys continue to authenticate. Keys are hashed (SHA-256) at rest and can be revoked individually. The `scripts/greploop.mjs` CLI and `scripts/hooks/pre-push` hook read `GREPLOOP_API_KEY` from the environment.
+All authenticated endpoints (`/api/command`, `/api/prcheck`, `/api/prcomments`, `/api/hooks/prepush`) require an API key via the `Authorization: Bearer <key>` header. Keys are generated from the UI sidebar → LLM Settings → "API Keys" tab. New keys use the `gl_` prefix; legacy `gl_mcp_` keys continue to authenticate. Keys are hashed (SHA-256) at rest and can be revoked individually. The `scripts/greploop.mjs` CLI and `scripts/hooks/pre-push` hook read `GREPLOOP_API_KEY` from the environment.
 
 ## Agent skill
 

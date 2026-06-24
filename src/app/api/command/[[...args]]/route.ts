@@ -6,14 +6,15 @@ import { runPrScan } from "@/reviewService";
 import { authenticateApiRequest } from "@/src/lib/apiAuth";
 import { IndexingService } from "@/src/services/indexingService";
 import { assertIndexFresh } from "@/src/lib/indexFreshness";
+import { isReviewActive, beginReview, endReview } from "@/src/lib/reviewLocks";
 
 function defaultRepoId(url: string, args?: string[]): string | null {
   if (args && args.length > 0) return args[0];
   try {
     const pathname = new URL(url).pathname;
     const parts = pathname.split("/").filter(Boolean);
-    if (parts.length >= 5 && parts[0] === "api" && parts[1] === "mcp" && parts[2] === "command") {
-      return parts[4] || null;
+    if (parts.length >= 3 && parts[0] === "api" && parts[1] === "command") {
+      return parts[2] || null;
     }
   } catch {}
   return null;
@@ -22,33 +23,6 @@ function defaultRepoId(url: string, args?: string[]): string | null {
 function withDefaultRepo(args: any, defRepo: string | null): any {
   if (defRepo && !args.repoId) return { ...args, repoId: defRepo };
   return args;
-}
-
-/**
- * In-progress review tracker. Maps prId → start timestamp.
- *
- * Why TTL: a review that hangs (network partition, LLM API stall, unhandled
- * rejection that bypasses .catch) would otherwise sit in the Set forever,
- * blocking re-reviews. Reviews older than REVIEW_TTL_MS are evicted on
- * read and the caller can re-queue.
- *
- * Restart note: this Map is in-memory only. A server crash mid-review
- * loses the entry — the PR simply appears "not in progress" and the
- * caller can re-trigger. Acceptable for single-user dev; a persistent
- * queue would be the production fix.
- */
-const activeReviews = new Map<string, number>();
-const REVIEW_TTL_MS = 5 * 60 * 1000;
-
-function isReviewActive(prId: string): boolean {
-  const startedAt = activeReviews.get(prId);
-  if (!startedAt) return false;
-  if (Date.now() - startedAt > REVIEW_TTL_MS) {
-    activeReviews.delete(prId);
-    console.warn(`[mcp] review timed out for ${prId} (>${REVIEW_TTL_MS}ms) — evicted`);
-    return false;
-  }
-  return true;
 }
 
 function toolsWithRepo(repo: string | null): any[] {
@@ -165,13 +139,13 @@ async function handlePrCheck(args: any): Promise<string> {
     console.warn("[api] prfile refresh failed, using cached:", e);
   }
 
-  activeReviews.set(pr.id, Date.now());
+  beginReview(pr.id);
   runPrScan(pr.id).then((sr) => {
-    activeReviews.delete(pr.id);
+    endReview(pr.id);
     prisma.pullRequest.updateMany({ where: { id: pr.id }, data: { rating: sr.rating } }).catch(() => {});
     console.log(`[api] review complete for ${pr.sourceBranch}: ${sr.rating}/10`);
   }).catch((err) => {
-    activeReviews.delete(pr.id);
+    endReview(pr.id);
     console.error(`[api] review failed for ${pr.sourceBranch}:`, err);
   });
 
@@ -322,13 +296,13 @@ async function handleLegacyCommand(body: any, defRepo: string | null) {
           message: `> ⚠ **${freshness.kind === "INDEX_REQUIRED" ? "Index required" : "Stale index"}.** ${freshness.message}`,
         });
       }
-      activeReviews.set(pr.id, Date.now());
+      beginReview(pr.id);
       runPrScan(pr.id).then((sr) => {
-        activeReviews.delete(pr.id);
+        endReview(pr.id);
         prisma.pullRequest.updateMany({ where: { id: pr.id }, data: { rating: sr.rating } }).catch(() => {});
         console.log(`[api-legacy] review complete for ${pr.sourceBranch}: ${sr.rating}/10`);
       }).catch((err) => {
-        activeReviews.delete(pr.id);
+        endReview(pr.id);
         console.error(`[api-legacy] review failed for ${pr.sourceBranch}:`, err);
       });
       return NextResponse.json({

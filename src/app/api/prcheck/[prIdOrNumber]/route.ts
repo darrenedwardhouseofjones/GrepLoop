@@ -70,7 +70,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ prIdOrNu
       systemWarn: scanResult.systemWarn
     });
   } catch (err: any) {
-    console.error("[MCP prcheck error]:", err);
+    console.error("[prcheck error]:", err);
     return NextResponse.json({ status: "Error", message: err.message }, { status: 500 });
   }
 }

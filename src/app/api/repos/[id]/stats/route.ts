@@ -47,10 +47,13 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
 
 async function getEmbeddingStats(repoId: string): Promise<{ embeddingCoveragePct: number; fileCountWithEmbeddings: number }> {
   try {
-    const [totalFiles, symbolsWithEmbeds] = await Promise.all([
+    // `embedding` is a Prisma `Unsupported("vector")` column, so it can't be
+    // filtered via the typed `where` — count it with raw SQL instead.
+    const [totalFiles, embedRows] = await Promise.all([
       prisma.file.count({ where: { repoId } }),
-      prisma.symbol.count({ where: { repoId, embedding: { not: null } } }),
+      prisma.$queryRaw<{ count: bigint }[]>`SELECT COUNT(*)::bigint AS count FROM "symbols" WHERE "repoId" = ${repoId} AND embedding IS NOT NULL`,
     ]);
+    const symbolsWithEmbeds = Number(embedRows[0]?.count ?? 0);
     const totalSymbols = await prisma.symbol.count({ where: { repoId } });
     return {
       fileCountWithEmbeddings: totalFiles,

@@ -59,6 +59,24 @@ export async function POST(req: Request) {
     }
 
     const result = await runPrScan(pr.id);
+
+    // A null rating means the LLM chain couldn't produce a review (provider
+    // outage / misconfig / model without tool-calling) — NOT a code-quality
+    // failure. Surface the real reason via `error` (the pre-push hook prints
+    // it and exits 1) instead of reporting a bogus "rating null/10" block.
+    if (result.rating === null) {
+      const reason = result.systemWarn || "LLM review unavailable — no rating produced.";
+      return NextResponse.json({
+        passed: false,
+        rating: null,
+        findingsCount: result.findings.length,
+        findings: result.findings,
+        error: `Review could not run — ${reason} (push not gated on code quality; fix LLM Settings or use --no-verify)`,
+        systemWarn: result.systemWarn,
+        usedModel: result.usedModel,
+      }, { status: 503 });
+    }
+
     const passed = result.rating >= 8;
 
     return NextResponse.json({

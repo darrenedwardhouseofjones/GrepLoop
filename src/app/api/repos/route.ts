@@ -56,6 +56,28 @@ export async function POST(req: Request) {
       const cleanId = id || name.toLowerCase().replace(/[^a-z0-9]/g, "-") + "-" + Date.now();
 
       try {
+        const { execSync } = require('child_process');
+        try {
+          execSync('git --version', { stdio: 'ignore' });
+        } catch {
+          return NextResponse.json({ error: "Git is not installed or not available in the system PATH. Please install Git to use local repositories." }, { status: 400 });
+        }
+        
+        const fs = require('fs');
+        if (!fs.existsSync(repoPath) || !fs.statSync(repoPath).isDirectory()) {
+          return NextResponse.json({ error: `Directory "${repoPath}" does not exist on disk.` }, { status: 400 });
+        }
+
+        try {
+          execSync('git rev-parse --is-inside-work-tree', { cwd: repoPath, stdio: 'ignore' });
+        } catch {
+          return NextResponse.json({ error: `Directory "${repoPath}" is not a valid git repository. Please run 'git init' inside the directory first.` }, { status: 400 });
+        }
+      } catch (err: any) {
+        return NextResponse.json({ error: "Failed to validate git repository: " + err.message }, { status: 500 });
+      }
+
+      try {
         await prisma.repository.create({
           data: {
             id: cleanId,

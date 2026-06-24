@@ -52,7 +52,7 @@ The GrepLoop review returns a rating from 1 to 10:
 
 ## API endpoints
 
-All POST to `/api/mcp/command`. Body is JSON.
+All POST to `/api/command`. Body is JSON.
 
 **Start a review** — `{ "tool": "prcheck", "args": { "number": "5" } }` or `{ "args": { "repoId": "...", "branch": "..." } }`. Returns immediately; poll with `prcheckstatus`.
 

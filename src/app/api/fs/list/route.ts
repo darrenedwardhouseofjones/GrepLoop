@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { readdir, stat } from "fs/promises";
 import { homedir } from "os";
 import path from "path";
+import { requireSession } from "@/src/lib/api-auth";
 
 /**
  * Lists directories under a given path. Used by the DirectoryPickerModal to
@@ -15,6 +16,11 @@ import path from "path";
  * is reported; broken symlinks are silently skipped.
  */
 export async function GET(req: Request) {
+  try {
+    await requireSession(req);
+  } catch {
+    return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
+  }
   const url = new URL(req.url);
   const rawPath = url.searchParams.get("path");
 

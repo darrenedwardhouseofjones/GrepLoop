@@ -41,7 +41,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ prIdOrNu
       }))
     });
   } catch (err: any) {
-    console.error("[MCP prcomments error]:", err);
+    console.error("[prcomments error]:", err);
     return NextResponse.json({ status: "Error", message: err.message }, { status: 500 });
   }
 }

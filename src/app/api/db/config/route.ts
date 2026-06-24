@@ -5,12 +5,23 @@ import {
   testConnectionString,
   viewFromEnv,
 } from "@/src/lib/dbConfig";
+import { requireSession } from "@/src/lib/api-auth";
 
-export async function GET() {
+export async function GET(req: Request) {
+  try {
+    await requireSession(req);
+  } catch {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
   return NextResponse.json(viewFromEnv());
 }
 
 export async function POST(req: Request) {
+  try {
+    await requireSession(req);
+  } catch {
+    return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
+  }
   try {
     const body = await req.json().catch(() => ({}));
     const cs = buildConnectionString({

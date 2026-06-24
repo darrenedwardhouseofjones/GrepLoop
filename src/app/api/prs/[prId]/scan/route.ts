@@ -4,13 +4,27 @@ import { runPrScan } from "@/reviewService";
 import { refreshPrFiles } from "@/src/lib/getRealLocalPrs";
 import { assertIndexFresh } from "@/src/lib/indexFreshness";
 import { IndexingService } from "@/src/services/indexingService";
+import { getChatChain, getEmbeddingChain } from "@/src/lib/llmClient";
+import { isReviewActive, beginReview, endReview } from "@/src/lib/reviewLocks";
 
 export async function POST(req: Request, { params }: { params: Promise<{ prId: string }> }) {
   const { prId } = await params;
   await req.json().catch(() => ({}));
   console.log(`[scan] route: POST received for prId=${prId}`);
 
+  // Tracks whether THIS request acquired the review lock, so a failure
+  // before acquisition never clears a concurrent scan's lock.
+  let acquired = false;
   try {
+    const chatChain = getChatChain();
+    if (chatChain.length === 0) {
+      return NextResponse.json({ error: "No primary chat model configured. Please go to LLM Settings and configure an endpoint (e.g., OpenRouter or Ollama) to enable PR scanning." }, { status: 400 });
+    }
+
+    const embedChain = getEmbeddingChain();
+    if (embedChain.length === 0) {
+      return NextResponse.json({ error: "No embedding model configured. Please go to LLM Settings and configure an embedding provider (e.g., mxbai-embed-large via local Ollama) to enable semantic codebase context." }, { status: 400 });
+    }
     const pr = await prisma.pullRequest.findUnique({
       where: { id: prId },
       select: { repoId: true, sourceBranch: true, targetBranch: true },
@@ -50,6 +64,20 @@ export async function POST(req: Request, { params }: { params: Promise<{ prId: s
       console.log(`[scan] route: freshness check OK (indexedAt=${repo.indexedAt})`);
     }
 
+    // Concurrency guard — shared with the command/prcheck routes. Two scans of one PR
+    // would race deleteMany→createMany, double-increment reviewsCount, and
+    // duplicate reviewHistory. Reject the duplicate without touching the
+    // in-flight scan's lock.
+    if (isReviewActive(prId)) {
+      console.log(`[scan] route: review already in progress for ${prId} — 409`);
+      return NextResponse.json(
+        { error: "A review is already in progress for this PR. Wait for it to finish before re-scanning." },
+        { status: 409 },
+      );
+    }
+    beginReview(prId);
+    acquired = true;
+
     await prisma.pullRequest.updateMany({ where: { id: prId }, data: { status: 'In Progress' } });
     const deletedLogs = await prisma.reviewLog.deleteMany({ where: { prId } });
     console.log(`[scan] route: status set to In Progress, deleted ${deletedLogs.count} stale review logs`);
@@ -69,9 +97,11 @@ export async function POST(req: Request, { params }: { params: Promise<{ prId: s
     const result = await runPrScan(prId, files);
     console.log(`[scan] route: runPrScan complete - rating=${result.rating}, findings=${result.findings?.length}, model=${result.usedModel}`);
 
+    if (acquired) endReview(prId);
     return NextResponse.json(result);
   } catch (err: any) {
     console.error(`[scan] route: ERROR:`, err);
+    if (acquired) endReview(prId);
     try {
       await prisma.pullRequest.updateMany({ where: { id: prId }, data: { status: 'Failed' } });
       console.log(`[scan] route: PR status set to Failed`);

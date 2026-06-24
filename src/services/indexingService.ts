@@ -48,6 +48,30 @@ export class IndexingService {
   /** Repo ids with an in-flight index run. Prevents concurrent requests
    *  from racing the delete phase against each other's insert phase. */
   private static activeIndexers = new Set<string>();
+  private static activeEnrichers = new Set<string>();
+
+  private static findBlockEnd(lines: string[], startLineIdx: number, language: string): number {
+    const limit = Math.min(lines.length, startLineIdx + 500);
+    if (language === "python") {
+      const startIndent = Math.max(0, lines[startLineIdx].search(/\S/));
+      for (let i = startLineIdx + 1; i < limit; i++) {
+        if (!lines[i].trim()) continue;
+        if (lines[i].search(/\S/) <= startIndent) return i;
+      }
+      return limit;
+    } else {
+      let depth = 0;
+      let started = false;
+      for (let i = startLineIdx; i < limit; i++) {
+        for (const char of lines[i]) {
+          if (char === '{') { depth++; started = true; }
+          else if (char === '}') { depth--; }
+        }
+        if (started && depth === 0) return i + 1;
+      }
+      return Math.min(lines.length, startLineIdx + 15);
+    }
+  }
 
   /** True if an index run is currently in progress for this repo. */
   public static isIndexing(repoId: string): boolean {
@@ -124,7 +148,7 @@ export class IndexingService {
             kind: activeClassName ? "method" : "function",
             language,
             lineStart: lineNum,
-            lineEnd: Math.min(lines.length, lineNum + 10), // tentative end line
+            lineEnd: this.findBlockEnd(lines, i, language),
             signature: defMatch[0],
             sourceHash: getHash(lines.slice(i, i + 8).join("\n"))
           });
@@ -169,7 +193,7 @@ export class IndexingService {
             kind: activeClassName ? "method" : "function",
             language,
             lineStart: lineNum,
-            lineEnd: Math.min(lines.length, lineNum + 12),
+            lineEnd: this.findBlockEnd(lines, i, language),
             signature: fnMatch[0],
             sourceHash: getHash(lines.slice(i, i + 10).join("\n"))
           });
@@ -215,7 +239,7 @@ export class IndexingService {
             kind: activeClassName ? "method" : "function",
             language,
             lineStart: lineNum,
-            lineEnd: Math.min(lines.length, lineNum + 15),
+            lineEnd: this.findBlockEnd(lines, i, language),
             signature: fnMatch[0],
             sourceHash: getHash(lines.slice(i, i + 12).join("\n"))
           });
@@ -260,7 +284,7 @@ export class IndexingService {
               : "function",
             language,
             lineStart: lineNum,
-            lineEnd: Math.min(lines.length, lineNum + 15),
+            lineEnd: this.findBlockEnd(lines, i, language),
             signature: funcMatch[0],
             sourceHash: getHash(lines.slice(i, i + 10).join("\n"))
           });
@@ -282,7 +306,7 @@ export class IndexingService {
             kind: "function",
             language,
             lineStart: lineNum,
-            lineEnd: Math.min(lines.length, lineNum + 15),
+            lineEnd: this.findBlockEnd(lines, i, language),
             signature: simpleFn[0],
             sourceHash: getHash(lines.slice(i, i + 10).join("\n"))
           });
@@ -426,17 +450,21 @@ export class IndexingService {
 
     // 1. Handle deleted files: remove from files, symbols, and edges
     if (deletedFilePaths.length > 0) {
-      await prisma.file.deleteMany({ where: { repoId, filePath: { in: deletedFilePaths } } });
-      await prisma.symbol.deleteMany({ where: { repoId, filePath: { in: deletedFilePaths } } });
-      await prisma.edge.deleteMany({ where: { repoId, filePath: { in: deletedFilePaths } } });
+      await prisma.$transaction([
+        prisma.file.deleteMany({ where: { repoId, filePath: { in: deletedFilePaths } } }),
+        prisma.symbol.deleteMany({ where: { repoId, filePath: { in: deletedFilePaths } } }),
+        prisma.edge.deleteMany({ where: { repoId, filePath: { in: deletedFilePaths } } })
+      ]);
     }
 
     // 2. For changed files: remove old symbols+edges (files updated below)
     const changedPaths = changed.map(f => f.relativePath);
     if (changedPaths.length > 0) {
-      await prisma.file.deleteMany({ where: { repoId, filePath: { in: changedPaths } } });
-      await prisma.symbol.deleteMany({ where: { repoId, filePath: { in: changedPaths } } });
-      await prisma.edge.deleteMany({ where: { repoId, filePath: { in: changedPaths } } });
+      await prisma.$transaction([
+        prisma.file.deleteMany({ where: { repoId, filePath: { in: changedPaths } } }),
+        prisma.symbol.deleteMany({ where: { repoId, filePath: { in: changedPaths } } }),
+        prisma.edge.deleteMany({ where: { repoId, filePath: { in: changedPaths } } })
+      ]);
     }
 
     // 3. Load existing (unchanged) symbols into lookup for cross-file edge resolution
@@ -609,6 +637,8 @@ export class IndexingService {
    * and embeddings for symbols that don't have them yet.
    */
   public static async startBackgroundEnrichment(repoId: string, repoPath: string) {
+    if (this.activeEnrichers.has(repoId)) return;
+    this.activeEnrichers.add(repoId);
     // We run asynchronously to prevent blocking the UI
     setTimeout(async () => {
       try {
@@ -617,12 +647,15 @@ export class IndexingService {
           where: {
             repoId,
             summary: null,
+            summaryAt: null, // skip symbols we've already attempted — avoids
+                             // an infinite re-select loop when enrichment fails
           },
           take: 100, // Batch limit to avoid rate limits
         });
 
         if (symbolsToEnrich.length === 0) {
           console.log(`[Indexing] repo ${repoId} is fully enriched.`);
+          this.activeEnrichers.delete(repoId);
           return;
         }
 
@@ -641,28 +674,41 @@ export class IndexingService {
           const sourceCode = lines.slice(Math.max(0, sym.lineStart - 1), end).join("\n");
 
           const summary = await EmbeddingService.generateSummary(sym.name, sym.filePath, sym.signature || sym.name, sourceCode);
-          if (summary) {
-            const vector = await EmbeddingService.generateEmbedding(summary);
-            await prisma.symbol.update({
-              where: { id: sym.id },
-              data: {
-                summary,
-                summaryAt: BigInt(Date.now()),
-                embedding: JSON.stringify(vector),
-              }
-            });
-            console.log(`[Indexing] Enriched: ${sym.name}`);
+          // Always stamp summaryAt so a symbol we couldn't summarise/embed
+          // isn't reselected forever. The three writes below are mutually
+          // exclusive; each leaves summaryAt set.
+          const now = BigInt(Date.now());
+          if (!summary) {
+            // Chat returned nothing (model down / empty). Mark attempted, move on.
+            await prisma.$executeRaw`UPDATE "symbols" SET "summaryAt" = ${now} WHERE "id" = ${sym.id}`;
+            continue;
           }
+
+          const vector = await EmbeddingService.generateEmbedding(summary);
+          if (!vector || vector.length === 0) {
+            // Embedding provider failed / circuit open. Persist the summary
+            // alone (leave embedding NULL) instead of throwing on "[]"::vector
+            // and dropping the summary with it.
+            await prisma.$executeRaw`UPDATE "symbols" SET "summary" = ${summary}, "summaryAt" = ${now} WHERE "id" = ${sym.id}`;
+            console.log(`[Indexing] Summarised (no embedding): ${sym.name}`);
+            continue;
+          }
+
+          const vectorStr = JSON.stringify(vector);
+          await prisma.$executeRaw`UPDATE "symbols" SET "summary" = ${summary}, "summaryAt" = ${now}, "embedding" = ${vectorStr}::vector WHERE "id" = ${sym.id}`;
+          console.log(`[Indexing] Enriched: ${sym.name}`);
 
           // Gentle delay to respect API bounds
           await new Promise(r => setTimeout(r, 2000));
         }
 
         // Loop recursively until done
+        this.activeEnrichers.delete(repoId);
         this.startBackgroundEnrichment(repoId, repoPath);
 
       } catch (err) {
         console.error("Background enrichment failed:", err);
+        this.activeEnrichers.delete(repoId);
       }
     }, 1000);
   }
@@ -673,21 +719,18 @@ export class IndexingService {
   public static async semanticSearch(repoId: string, query: string, limit = 5) {
     const queryVector = await EmbeddingService.generateEmbedding(query);
     if (!queryVector || queryVector.length === 0) return [];
+    
+    const vectorStr = JSON.stringify(queryVector);
 
-    const allEnriched = await prisma.symbol.findMany({
-      where: { repoId, embedding: { not: null } }
-    });
+    const scored = await prisma.$queryRaw<any[]>`
+      SELECT id, "repoId", "filePath", name, kind, language, "lineStart", "lineEnd", signature, "sourceHash", summary,
+             1 - (embedding <=> ${vectorStr}::vector) as score
+      FROM "symbols"
+      WHERE "repoId" = ${repoId} AND embedding IS NOT NULL
+      ORDER BY embedding <=> ${vectorStr}::vector
+      LIMIT ${limit}
+    `;
 
-    const scored = allEnriched.map(sym => {
-      const vec = JSON.parse(sym.embedding as string) as number[];
-      const score = EmbeddingService.cosineSimilarity(queryVector, vec);
-      return { sym, score };
-    });
-
-    scored.sort((a, b) => b.score - a.score);
-    return scored.slice(0, limit).map(s => ({
-      ...s.sym,
-      score: s.score
-    }));
+    return scored;
   }
 }

@@ -7,6 +7,7 @@ import {
   type Preset,
   type PresetsFile,
 } from "@/src/lib/llmPresets";
+import { requireSession } from "@/src/lib/api-auth";
 
 /**
  * GET /api/llm/presets
@@ -34,6 +35,11 @@ export async function GET() {
  * re-enter it on every save). To remove a key, delete the preset entirely.
  */
 export async function PUT(req: Request) {
+  try {
+    await requireSession(req);
+  } catch {
+    return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
+  }
   try {
     const incoming = await req.json().catch(() => ({}));
     validatePresetsInput(incoming);
