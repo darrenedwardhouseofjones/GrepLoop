@@ -161,7 +161,7 @@ export default function ReviewCard({ activePR, findings, onCopySuggestion, copyF
           </p>
         </div>
       ) : (
-        <div className="divide-y divide-white/5">
+        <div className="divide-y divide-white/5 max-h-[70vh] overflow-y-auto">
           {severityOrder.map((sev) => {
             const group = findings.filter((f) => f.severity === sev);
             if (group.length === 0) return null;
