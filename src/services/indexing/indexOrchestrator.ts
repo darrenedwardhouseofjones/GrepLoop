@@ -25,9 +25,10 @@ import { execFileSync } from "node:child_process";
 
 import { prisma } from "@/src/lib/prisma";
 import { currentHeadCommit } from "@/src/lib/indexFreshness";
+import { isSupportedFilePath } from "@/src/lib/treeSitter";
 import { EmbeddingService } from "../embeddingService";
 
-import { LegacyRegexParser } from "./legacyRegexParser";
+import { parseFileSymbols as tsParseFileSymbols } from "./tsParser";
 import {
   buildSymbolLookup,
   resolveCallsToEdges,
@@ -169,7 +170,7 @@ export class IndexingService {
           parsedAt: BigInt(Date.now()),
         });
 
-        const parsed = this.parseFile(repoId, f.relativePath, f.code);
+        const parsed = await this.parseFile(repoId, f.relativePath, f.code);
 
         for (const meta of parsed.symbols) {
           const symId = makeSymbolId(repoId, f.relativePath, meta);
@@ -249,15 +250,24 @@ export class IndexingService {
   /**
    * Dispatches a file to the right parser by extension.
    *
-   * PHASE 4 STATE: routes everything to LegacyRegexParser. The swap to
-   * tree-sitter (tsParser.ts) happens in Phase 7 of the tree-sitter spec.
+   * v1: TS/JS/TSX/JSX → tree-sitter parser (tsParser.ts).
+   * Other extensions (Python, Go, etc.) return an empty parse with a
+   * logged warning — they're walked but contribute zero symbols until
+   * follow-on language specs land. Honest partial indexing, not a regex
+   * fallback that would produce wrong line ranges.
    */
-  private static parseFile(
+  private static async parseFile(
     repoId: string,
     filePath: string,
     content: string,
-  ): ParsedFile {
-    return LegacyRegexParser.parseFileSymbols(repoId, filePath, content);
+  ): Promise<ParsedFile> {
+    if (!isSupportedFilePath(filePath)) {
+      console.warn(
+        `[indexing] skipping ${filePath}: no grammar yet (v1 supports .ts/.tsx/.js/.jsx)`,
+      );
+      return { symbols: [], rawCalls: [] };
+    }
+    return tsParseFileSymbols(repoId, filePath, content);
   }
 
   private static async pruneDeletedAndChangedSymbols(

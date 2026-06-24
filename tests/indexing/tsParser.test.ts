@@ -1,17 +1,18 @@
 import { describe, it, expect } from "vitest";
 import { parseFileSymbols as tsParse } from "../../src/services/indexing/tsParser";
-import { LegacyRegexParser } from "../../src/services/indexing/legacyRegexParser";
 
 const REPO_ID = "test-repo";
 
 /**
- * Parity + correctness tests for the tree-sitter TS/JS parser.
+ * Correctness + regression tests for the tree-sitter TS/JS parser.
  *
- * Three layers:
+ * Coverage:
  *   1. Correctness — does the parser extract what's actually there?
- *   2. Stability — same input → same symbol IDs across re-parses?
- *   3. Parity — does it agree with the legacy regex parser on obvious cases
- *      (named functions, classes) AND correctly fix known regex bugs?
+ *   2. Stability — same input → same output across re-parses?
+ *   3. Regression guards — explicit tests for the bugs the previous
+ *      regex parser had (phantom symbols from comments, control-flow
+ *      keywords matched as calls, brace-counting drift on template
+ *      literals, private methods missed entirely).
  *
  * Fixtures live inline (no fs reads) so the tests run anywhere.
  */
@@ -258,64 +259,73 @@ const main = () => new Foo().bar();
   });
 });
 
-describe("tsParser — parity with legacy regex parser", () => {
-  it("agrees on named function extraction for simple cases", async () => {
-    const src = `
-function alpha() {}
-function beta() {}
-`.trim();
+describe("tsParser — regression guards for known regex-parser bugs", () => {
+  // The previous regex parser had four classes of bugs that tree-sitter
+  // eliminates by construction. These tests make the upgrade concrete
+  // and would catch any future regression to a regex-based approach.
 
-    const tsResult = await tsParse(REPO_ID, "test.ts", src);
-    const legacyResult = LegacyRegexParser.parseFileSymbols(REPO_ID, "test.ts", src);
-
-    const tsNames = tsResult.symbols.map((s) => s.name).sort();
-    const legacyNames = legacyResult.symbols.map((s) => s.name).sort();
-    expect(tsNames).toEqual(legacyNames);
-  });
-
-  it("agrees on class extraction", async () => {
-    const src = `
-class Service {}
-class Repository {}
-`.trim();
-
-    const tsResult = await tsParse(REPO_ID, "test.ts", src);
-    const legacyResult = LegacyRegexParser.parseFileSymbols(REPO_ID, "test.ts", src);
-
-    const tsClasses = tsResult.symbols.filter((s) => s.kind === "class").map((s) => s.name).sort();
-    const legacyClasses = legacyResult.symbols.filter((s) => s.kind === "class").map((s) => s.name).sort();
-    expect(tsClasses).toEqual(legacyClasses);
-  });
-
-  it("correctly skips phantom symbols from comments (regex parser's blind spot)", async () => {
-    // The regex parser happily matches `function fake() {` even when it's
-    // inside a comment, producing phantom symbols. Tree-sitter parses
-    // comments as comment nodes and never confuses them with declarations.
+  it("does not extract phantom symbols from comments", async () => {
+    // The regex parser matched `function fake() {` even inside a `//`
+    // comment, producing a phantom symbol. Tree-sitter parses comments
+    // as comment nodes and never confuses them with declarations.
     const src = `
 // function fake() {
+/* function anotherFake() { */
 function real() {}
 `.trim();
 
-    const tsResult = await tsParse(REPO_ID, "test.ts", src);
-    const legacyResult = LegacyRegexParser.parseFileSymbols(REPO_ID, "test.ts", src);
-
-    expect(tsResult.symbols.map((s) => s.name)).toEqual(["real"]);
-    // Document the regex bug we're replacing:
-    expect(legacyResult.symbols.map((s) => s.name)).toContain("fake");
+    const result = await tsParse(REPO_ID, "test.ts", src);
+    expect(result.symbols.map((s) => s.name)).toEqual(["real"]);
   });
 
-  it("extracts private methods the regex parser cannot see", async () => {
+  it("does not match control-flow keywords as call sites", async () => {
+    // The regex parser's `matchAll(name\\()` happily matched `if (`,
+    // `for (`, `switch (` because they look syntactically like calls.
     const src = `
-class Foo {
+function run(items: number[]) {
+  if (items.length > 0) {
+    for (const x of items) {
+      while (x > 0) {}
+    }
+    switch (x) {
+      case 1: break;
+    }
+  }
+}
+`.trim();
+
+    const result = await tsParse(REPO_ID, "test.ts", src);
+    const phantomCallees = result.rawCalls
+      .map((c) => c.toRaw)
+      .filter((n) => ["if", "for", "while", "switch", "case"].includes(n));
+    expect(phantomCallees).toEqual([]);
+  });
+
+  it("computes correct lineEnd when the body contains template literals with braces", async () => {
+    // The regex parser's brace counter treated `${}` in template literals
+    // as block delimiters, producing wrong lineEnd values. Tree-sitter
+    // parses template literals correctly and gives exact ranges.
+    const src = `
+function greet(name: string) {
+  const msg = \`Hello \${name}! You have \${5} new messages.\`;
+  return msg;
+}
+`.trim();
+
+    const result = await tsParse(REPO_ID, "test.ts", src);
+    expect(result.symbols[0]).toMatchObject({ lineStart: 1, lineEnd: 4 });
+  });
+
+  it("extracts private methods (the regex parser missed #name entirely)", async () => {
+    const src = `
+class Service {
   #privateMethod() {}
   regular() {}
 }
 `.trim();
 
-    const tsResult = await tsParse(REPO_ID, "test.ts", src);
-    const legacyResult = LegacyRegexParser.parseFileSymbols(REPO_ID, "test.ts", src);
-
-    expect(tsResult.symbols.map((s) => s.name)).toContain("#privateMethod");
-    expect(legacyResult.symbols.map((s) => s.name)).not.toContain("#privateMethod");
+    const result = await tsParse(REPO_ID, "test.ts", src);
+    expect(result.symbols.map((s) => s.name)).toContain("#privateMethod");
+    expect(result.symbols.map((s) => s.name)).toContain("regular");
   });
 });
