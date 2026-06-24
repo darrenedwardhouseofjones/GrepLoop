@@ -1,4 +1,5 @@
 import { getChatClient, getChatModel, getEmbeddingChain } from "../lib/llmClient";
+import { prisma } from "../lib/prisma";
 
 /**
  * Required embedding dimensionality. Matches the `vector(1024)` column
@@ -26,6 +27,85 @@ export const EMBEDDING_DIM = 1024;
  * config.
  */
 let embeddingCircuitOpen = false;
+
+/**
+ * Cached dimensionality of vectors already stored in `symbols.embedding`.
+ * Populated lazily on the first successful embedding call this session by
+ * querying `vector_dims()` on one non-null row.
+ *
+ * - `undefined` → not yet checked this session (will query on next success)
+ * - `null`      → queried, table has no vectors yet (will retry next call)
+ * - `number`    → queried, cached. Subsequent calls compare against this.
+ *
+ * Used to detect the painful footgun where an operator swaps the embedding
+ * model in LLM Settings without re-indexing: existing rows stay at the old
+ * dim, new rows land at the new dim, and cosine similarity silently returns
+ * wrong results (or errors) because vectors are length-mismatched.
+ */
+let cachedDbEmbeddingDim: number | null | undefined = undefined;
+
+/**
+ * One-shot guard for the dimension-mismatch warning. Once fired, suppressed
+ * for the rest of the session — avoids log spam across thousands of symbols.
+ * Reset only by process restart (same lifecycle as the circuit breaker).
+ */
+let dimMismatchWarned = false;
+
+/**
+ * Compares the dimensionality of vectors already stored in `symbols.embedding`
+ * against the dimensionality the active provider just returned. If they
+ * differ, emits a single structured warning explaining that the index is now
+ * inconsistent and how to fix it (re-index or truncate).
+ *
+ * Fail-open: any DB error is swallowed. This is a best-effort UX guard, not
+ * a correctness gate — the actual dim guard (EMBEDDING_DIM check above)
+ * handles correctness.
+ *
+ * Queried at most once per session (cached in `cachedDbEmbeddingDim`). If
+ * the table has no vectors yet, the cache stays `undefined` so we re-check
+ * on the next call until rows appear.
+ */
+async function checkDbEmbeddingDimMismatch(
+  providerDim: number,
+  providerName: string,
+): Promise<void> {
+  if (dimMismatchWarned) return;
+
+  if (cachedDbEmbeddingDim === undefined) {
+    try {
+      const rows = await prisma.$queryRaw<Array<{ dim: number | null }>>`
+        SELECT vector_dims(embedding) AS dim
+        FROM symbols
+        WHERE embedding IS NOT NULL
+        LIMIT 1
+      `;
+      cachedDbEmbeddingDim = rows[0]?.dim ?? null;
+    } catch {
+      // Fail open — DB unavailable, pgvector not installed, etc.
+      // Better to index with no warning than to block on metadata.
+      return;
+    }
+  }
+
+  // No vectors yet — nothing to compare. Leave cache as `undefined` so we
+  // retry on the next call (rows may appear later in the same session).
+  if (cachedDbEmbeddingDim === null) {
+    cachedDbEmbeddingDim = undefined;
+    return;
+  }
+
+  if (cachedDbEmbeddingDim !== providerDim) {
+    dimMismatchWarned = true;
+    console.warn(
+      `[embedding] ⚠ Dimension mismatch: database has ${cachedDbEmbeddingDim}-dim vectors ` +
+        `in symbols.embedding, but provider "${providerName}" now returns ${providerDim}-dim. ` +
+        `Cosine similarity requires equal-length vectors — new embeddings cannot be matched against ` +
+        `existing ones, so semantic search will silently return wrong results (or error) until the ` +
+        `index is rebuilt. Fix: re-index the repository from the UI (Repository → Re-index), or run ` +
+        `"DELETE FROM symbols WHERE embedding IS NOT NULL" via psql to start fresh at the new dimensionality.`,
+    );
+  }
+}
 
 export class EmbeddingService {
   /**
@@ -108,6 +188,10 @@ ${sourceCode}`;
           );
           continue;
         }
+        // Shape matches the schema column — but does it match what's
+        // already in the DB from a prior indexing run with a different
+        // model? If not, warn once so the operator knows to re-index.
+        await checkDbEmbeddingDimMismatch(vec.length, name);
         return vec;
       } catch (err: any) {
         console.warn(`[embedding] provider ${name} failed: ${(err?.message || String(err)).slice(0, 120)}`);
@@ -135,6 +219,17 @@ ${sourceCode}`;
    */
   public static resetCircuitBreaker(): void {
     embeddingCircuitOpen = false;
+  }
+
+  /**
+   * Test hook: reset the cached DB dim + one-shot mismatch-warning guard.
+   * Production code never needs this — both reset naturally on process
+   * restart. Exposed so unit tests can exercise the warning path from a
+   * clean slate without re-importing the module.
+   */
+  public static resetDimMismatchGuard(): void {
+    cachedDbEmbeddingDim = undefined;
+    dimMismatchWarned = false;
   }
 
   /** Test hook for inspecting breaker state. */
