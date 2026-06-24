@@ -1,5 +1,6 @@
 import { prisma } from "./prisma";
 import crypto from "crypto";
+import { requireSession } from "./api-auth";
 
 const KEY_PREFIX = "gl_";
 const LEGACY_KEY_PREFIX = "gl_mcp_";
@@ -42,26 +43,30 @@ export async function authenticateApiRequest(req: Request): Promise<{ ok: boolea
 }
 
 /**
- * Stricter auth for externally-facing endpoints (webhooks, reindex, stats).
- * Requires API key for cross-origin / non-browser requests, but allows
- * same-origin requests from the UI to pass without a key. This avoids
- * breaking the dashboard while still protecting against external attackers.
+ * Auth helper for routes that should accept EITHER a browser session
+ * (cookie-based, for the dashboard UI) OR a Bearer API key (for CLI /
+ * programmatic access). Performs real DB-backed validation of whichever
+ * credential is presented — no header heuristics.
  *
- * "Same origin" means the Origin header matches the Host header. Requests
- * without an Origin header (curls, bots, scripts) are considered external
- * and must authenticate.
+ * Replaces the old `authenticateIfExternal` which trusted the Host header
+ * (attacker-controlled in HTTP/1.1) to decide whether to require auth.
+ * `Host: localhost:3300` from any TCP client bypassed auth entirely.
+ *
+ * Order: API key first (single DB lookup), then session (Better Auth
+ * verifies the cookie against the sessions table).
  */
-export async function authenticateIfExternal(req: Request): Promise<{ ok: boolean; error?: string }> {
-  const origin = req.headers.get("origin");
-  const host = req.headers.get("host");
-  if (origin && host) {
-    try {
-      if (new URL(origin).host === host) return { ok: true };
-    } catch {}
+export async function authenticateSessionOrKey(req: Request): Promise<{ ok: boolean; error?: string }> {
+  const authHeader = req.headers.get("authorization");
+  if (authHeader && authHeader.startsWith("Bearer ")) {
+    return authenticateApiRequest(req);
   }
-  // Browser navigation / curl from localhost: no Origin header but definitely internal
-  if (host && (host.startsWith("localhost") || host.startsWith("127.0.0.1"))) {
+  try {
+    await requireSession(req);
     return { ok: true };
+  } catch {
+    return {
+      ok: false,
+      error: "Authentication required. Send a Bearer API key (Authorization: Bearer gl_…) or a valid session cookie.",
+    };
   }
-  return authenticateApiRequest(req);
 }

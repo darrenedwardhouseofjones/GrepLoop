@@ -1,22 +1,37 @@
 import { prisma } from "@/src/lib/prisma";
 
-export async function findPrByIdOrNumber(param: string): Promise<any | null> {
+/**
+ * Resolve a PR by ID, ordinal, or substring.
+ *
+ * @param param PR id, ordinal number, or substring.
+ * @param repoId When provided, ALL matching is scoped to this repository.
+ *   Callers that have a repoId in scope MUST pass it — without it, fuzzy
+ *   matching (ordinal, endsWith, contains) is disabled because an API key
+ *   valid for one repo could otherwise resolve PRs in another by guessing
+ *   numbers or substrings.
+ */
+export async function findPrByIdOrNumber(param: string, repoId?: string): Promise<any | null> {
   const normalized = param.toString().trim();
   if (!normalized) return null;
 
-  let pr = await prisma.pullRequest.findUnique({ where: { id: normalized } });
-  if (pr) return pr;
+  const exact = await prisma.pullRequest.findUnique({ where: { id: normalized } });
+  if (exact && (!repoId || exact.repoId === repoId)) return exact;
+
+  if (!repoId) {
+    return null;
+  }
 
   if (/^\d+$/.test(normalized)) {
-    pr = await prisma.pullRequest.findUnique({ where: { id: `pr-${normalized}` } });
-    if (pr) return pr;
+    const synth = await prisma.pullRequest.findUnique({ where: { id: `pr-${normalized}` } });
+    if (synth && synth.repoId === repoId) return synth;
 
     const list = await prisma.pullRequest.findMany({
-      where: { id: { endsWith: `-${normalized}` } },
+      where: { repoId, id: { endsWith: `-${normalized}` } },
     });
     if (list.length > 0) return list[0];
 
     const ordinal = await prisma.pullRequest.findMany({
+      where: { repoId },
       orderBy: { createdAt: "asc" },
       skip: parseInt(normalized, 10) - 1,
       take: 1,
@@ -25,7 +40,7 @@ export async function findPrByIdOrNumber(param: string): Promise<any | null> {
   }
 
   const fallback = await prisma.pullRequest.findFirst({
-    where: { id: { contains: normalized } },
+    where: { repoId, id: { contains: normalized } },
   });
   return fallback || null;
 }

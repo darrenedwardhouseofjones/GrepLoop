@@ -1,7 +1,8 @@
 import { execFileSync } from "node:child_process";
-import { writeFileSync, unlinkSync, mkdirSync } from "node:fs";
+import { writeFileSync, unlinkSync, mkdirSync, mkdtempSync, rmdirSync, chmodSync } from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
+import os from "node:os";
 
 const REPOS_SUBDIR = ".repos";
 
@@ -68,8 +69,20 @@ export function buildSshEnv(
   deployKey: string,
   keyId: string,
 ): { env: Record<string, string>; cleanup: () => void } {
-  const tmpDir = process.env.XDG_RUNTIME_DIR || "/tmp";
-  const keyFile = path.join(tmpDir, `greploop-deploykey-${keyId}`);
+  const baseTmp = process.env.XDG_RUNTIME_DIR || os.tmpdir();
+  // mkdtempSync gives a private, unpredictable directory. Earlier versions
+  // used a fixed name `greploop-deploykey-${keyId}` directly in /tmp —
+  // predictable path + 0o600 file still left the key readable if an attacker
+  // won the race between writeFileSync and chmod, or if the cleanup
+  // unlinkSync was skipped (process crash). Private 0o700 dir + readonly
+  // cleanup of both file and directory closes that.
+  const keyDir = mkdtempSync(path.join(baseTmp, "greploop-key-"));
+  try {
+    chmodSync(keyDir, 0o700);
+  } catch {
+    /* best-effort — mkdtempSync already creates with restrictive mode */
+  }
+  const keyFile = path.join(keyDir, "id_ed25519");
   writeFileSync(keyFile, deployKey, { mode: 0o600 });
   return {
     env: {
@@ -78,6 +91,7 @@ export function buildSshEnv(
     cleanup: () => {
       try {
         unlinkSync(keyFile);
+        rmdirSync(keyDir);
       } catch {
         /* best-effort */
       }

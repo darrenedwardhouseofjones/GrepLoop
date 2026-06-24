@@ -71,14 +71,17 @@ This is the longest phase. It has three sub-tracks that come together at the end
 
 This is what separates real review quality from diff-only reviewers per PRD Section 1.
 
-- [ ] **tree-sitter integration** for TypeScript first (eat our own dog food — GrepLoop itself is TS). Grammar: `tree-sitter-typescript`. Other languages (JS, Python, Go, Rust) added later, one per release.
+- [ ] **Replace regex/pattern indexing with real tree-sitter** — TypeScript/JavaScript first (eat our own dog food — GrepLoop itself is TS). Grammar: `tree-sitter-typescript`. Regex extraction is scaffolding only and does not satisfy the PRD.
+- [ ] **Stable AST node identity** — symbol IDs derived from repo, file, node kind, name, and line range so re-indexing is repeatable enough for evidence chains.
 - [ ] **Symbol extraction** — functions, classes, methods, exports. Schema: `Symbol` table with `{ repoId, filePath, name, kind, startLine, endLine, signature }`
-- [ ] **Call graph edges** — `caller → callee` per symbol. Schema: `CallEdge` table with `{ repoId, callerSymbolId, calleeSymbolId, callLocation }`
+- [ ] **Call graph edges** — `caller → callee` per symbol. Schema: `Edge` table with `{ repoId, fromId, toId, toRaw, kind, filePath, line }`. Normalize edge kinds (`CALLS` vs `call`) so review tools and index rows agree.
+- [ ] **Import/export graph** — extract `IMPORTS`, `DEFINES`, `EXTENDS`, and unresolved edges where tree-sitter can identify structure but not targets.
 - [ ] **Per-symbol LLM summaries** — one short paragraph per function (e.g. "Validates user session and returns the org membership"). Batched, cheap model, generated during indexing.
 - [ ] **pgvector enabled** on Supabase (it's available — just needs turning on)
 - [ ] **Embeddings** for every symbol + every docstring/comment block. Default to a local embedding model (`nomic-embed-text` via Ollama) to keep cost at zero; cloud embedding (OpenAI-compatible, e.g. `text-embedding-3-small` via OpenRouter) opt-in.
 - [ ] **Incremental indexing** — file watcher on the repo's git HEAD. Re-index only changed files. Full re-index only on first link or manual trigger.
 - [ ] **Indexing status UI** — the dashboard already has a polling UI; make it show real progress (files indexed, symbols extracted, embeddings generated)
+- [ ] **Indexer validation tests** — fixture files for TS route handlers/hooks/classes; assert symbol ranges, call edges, imports, and unchanged-file skip behavior.
 
 ### Track 1B: Real review engine
 
@@ -91,7 +94,10 @@ Replace the fake `reviewService.ts` with actual LLM-driven review.
   - All direct callers and callees of any symbol in the diff (call graph edges)
   - The LLM summary of each retrieved symbol
 - [ ] **Per-hunk LLM call** — diff hunk + retrieved context → structured findings array
-- [ ] **Evidence chain shape** — every finding: `{ finding, severity, category, file, lineRange, why, relatedSymbols: [{name, file, line}] }`. Every finding's line range is **validated to exist in the diff** before display (kills hallucinated evidence).
+- [ ] **Evidence chain shape** — every finding: `{ finding, severity, category, file, lineRange, why, relatedSymbols: [{name, file, line}] }`. Every finding's file/line references are **validated to exist** before display, and diff-origin findings validate against the diff hunk when applicable.
+- [ ] **Counter-evidence retrieval** — before persistence, gather local code that could disprove each candidate finding: proxy/middleware, auth helpers, route matchers, Prisma schema, caller context, locks, transactions, provider allowlists, env defaults, and framework docs when needed.
+- [ ] **Finding verifier** — add `src/services/findingVerifier.ts` to classify candidates as `confirmed`, `likely`, `partially_mitigated`, `needs_verification`, or `false_positive`; discard false positives, downgrade partials, and prevent unverified blockers.
+- [ ] **Precise wording guardrails** — final findings must mention mitigations found by the verifier; no absolute claims like "NO auth" when a proxy/session/API-key gate partially applies.
 - [ ] **Review categories** from PRD Section 14: OWASP top 10, WCAG, Core Web Vitals, type safety, plus standard bug/smell checks
 - [ ] **Persist findings** to `ReviewFinding` table (schema already exists) with full evidence chain JSON
 - [ ] **Streaming UI** — findings appear as they're generated, not after a 30-second wait
@@ -110,6 +116,8 @@ The endpoints already exist. Verify and polish the end-to-end flow:
 ### Definition of Done (the MVP gate)
 - A scan against a real PR produces findings that cite actual line ranges in the codebase
 - Findings include context from outside the diff (proves indexing works)
+- Every blocker has a full entrypoint-to-impact evidence chain and a counter-evidence section
+- False positives, unverifiable claims, and findings with invalid lines are discarded or downgraded before persistence
 - Running the same scan twice produces ~the same output (stability)
 - Cost per review is visible in the UI
 - The fake sample findings in `reviewService.ts` are deleted
@@ -117,11 +125,12 @@ The endpoints already exist. Verify and polish the end-to-end flow:
 
 ### Risks (the things most likely to slow Phase 1)
 1. **Hallucinated evidence** — LLM cites line 472 of a 200-line file. Mitigation: hard-validate every line range before display.
-2. **Embedding cost** — 100k symbols × cloud embedding API = real money. Default to local embeddings via Ollama; cloud opt-in.
-3. **tree-sitter grammar maintenance** — start with TS only; add languages one at a time after MVP.
-4. **pgvector index choice** — HNSW vs IVFFlat. Default HNSW for recall; revisit at scale.
-5. **Indexing latency** — first-time indexing of a 50k-line repo must be tolerable. Aim for <5 minutes; incremental <30s.
-6. **LLM call cost runaway** — without per-org quotas (post-MVP) a tight inner loop could rack up a big bill. Hard-cap reviews-per-day per repo as a stopgap.
+2. **Overstated findings** — model sees a risky local pattern but misses surrounding mitigations. Mitigation: mandatory counter-evidence retrieval and verifier downgrade rules.
+3. **Embedding cost** — 100k symbols × cloud embedding API = real money. Default to local embeddings via Ollama; cloud opt-in.
+4. **tree-sitter grammar maintenance** — start with TS only; add languages one at a time after MVP.
+5. **pgvector index choice** — HNSW vs IVFFlat. Default HNSW for recall; revisit at scale.
+6. **Indexing latency** — first-time indexing of a 50k-line repo must be tolerable. Aim for <5 minutes; incremental <30s.
+7. **LLM call cost runaway** — without per-org quotas (post-MVP) a tight inner loop could rack up a big bill. Hard-cap reviews-per-day per repo as a stopgap.
 
 ### Out of scope for MVP (deferred to later phases)
 - Multi-user auth (you can test solo)

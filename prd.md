@@ -196,6 +196,8 @@ Parses every source file into an AST and extracts: function/method definitions (
 
 **Limitations:** Tree-sitter is a parser, not a type-checker. It doesn't resolve types or dynamic call targets. BugHunter flags call sites it cannot statically resolve rather than silently dropping them.
 
+**Non-negotiable:** v1 indexing must use real tree-sitter parsers, not regex or hand-rolled pattern matching. Regex extraction is acceptable only as throwaway scaffolding while wiring the rest of the pipeline. The Greptile-tier claim depends on stable AST node ranges, import/call-site structure, and repeatable symbol identity; regex parsing cannot provide enough precision for evidence validation or counter-evidence retrieval.
+
 ### 11.2 Stage 2 — Call graph construction
 Directed graph with edges: `CALLS`, `IMPORTS`, `DEFINES`, `EXTENDS`, `OVERRIDES`. Edges store source location (file + line) so the agent can cite them precisely in evidence chains. Import resolution follows the language's module system; unresolvable imports are stored as unresolved edges.
 
@@ -275,6 +277,7 @@ A single LLM call with pre-assembled context is fundamentally limited: you retri
 searchCodebase(query)        → symbol[]   semantic search over embedded summaries
 getCallers(symbolId)         → symbol[]   functions that call the given symbol
 findSimilar(query)           → symbol[]   semantically similar code via embeddings
+readFile(filePath)           → numbered source file content scoped to the repo
 submitReview(rating, summary, findings[])  terminal — ends the loop
 ```
 
@@ -295,8 +298,38 @@ evidenceChain: [{file, line, text}, ...]   multi-hop trace
 
 Every finding must have at least one evidence entry — a specific file and line reference from the codebase that supports the claim. Findings the agent cannot support with evidence are discarded before report assembly.
 
-### 14.5 Fallback behavior
-If no LLM is configured, the loop short-circuits to `generateRealisticFindings()` (procedural findings) and the UI surfaces a `systemWarn` explaining the LLM isn't configured. **This fallback is demo scaffolding and should be gated behind an explicit `DEMO_MODE` flag before production use** — otherwise misconfigured installs silently produce canned findings. See Open Questions §19.
+### 14.5 Counter-evidence verification
+The review model produces **candidate findings**, not final findings. Before anything is persisted or shown as a blocker, BugHunter runs a verification pass that tries to disprove each claim.
+
+For every candidate finding, the verifier must gather counter-evidence based on category and file type:
+
+- **Auth/security route findings** — inspect route handler, `proxy.ts`/middleware, auth helpers, API-key/session utilities, caller path, and matcher exclusions.
+- **Data isolation findings** — inspect Prisma schema, `where` clauses, caller-supplied repo/org context, unique constraints, and route params.
+- **Webhook/network findings** — inspect provider parsing, target URL construction, body overrides, env defaults, HMAC/token verification, and API base allowlists.
+- **Race/concurrency findings** — inspect locks, transactions, idempotency, background jobs, retry behavior, and shared mutable state.
+- **Framework/library findings** — use official docs or MCP/web search for framework semantics, but repo-specific exploitability must still be proven from local code.
+
+The verifier classifies each candidate:
+
+```
+status: confirmed | likely | partially_mitigated | needs_verification | false_positive
+finalSeverity: blocker | warning | suggestion
+finalConfidence: 0.0-1.0
+supportingEvidence: [{file, line, text}, ...]
+counterEvidence: [{file, line, text, effect}, ...]
+assumptions: string[]
+```
+
+Publishing rules:
+
+- `false_positive` findings are discarded.
+- `needs_verification` findings cannot be blockers.
+- `partially_mitigated` findings must explicitly describe the mitigation and cannot use absolute wording like "NO authentication" or "trivial bypass."
+- `blocker` findings require a complete entrypoint-to-impact chain plus counter-evidence checked.
+- Findings with invalid file paths, nonexistent lines, or empty evidence chains are discarded.
+
+### 14.6 Fallback behavior
+If no LLM is configured, the review returns no findings, `rating: null`, and an actionable `systemWarn` explaining that the chat model is unconfigured or unavailable. BugHunter must never silently fabricate procedural findings in normal operation. Any demo findings must be gated behind an explicit `DEMO_MODE=true` flag and visually labeled as demo output.
 
 ---
 
@@ -324,8 +357,14 @@ Each finding in the rendered report includes a collapsible evidence trail:
 
 **Confidence scoring:**
 - **High (>0.8)** — direct code evidence of the bug, traceable end-to-end.
-- **Medium (0.4–0.8)** — strong circumstantial evidence.
-- **Low (<0.4)** — potential issue but cannot confirm without runtime info. Included but visually separated.
+- **Medium (0.4–0.8)** — strong evidence, but at least one assumption remains.
+- **Low (<0.4)** — potential issue but cannot confirm without runtime info. Not eligible for blocker severity and visually separated if shown.
+
+Every rendered finding also includes counter-evidence status:
+
+```markdown
+**Verification:** Partially mitigated — route handler has no API-key check, but `src/proxy.ts` gates `/api/prs/*` by Better Auth session cookie. Downgraded from unauthenticated blocker to defense-in-depth warning.
+```
 
 **Summary metrics** at the top of every report: total findings by category and severity, files changed, lines changed, model(s) used, review pass duration, context-window utilisation.
 
@@ -420,7 +459,8 @@ For single-model reviews (the current default), one `ReviewPass` is created per 
 ## 19. Open Questions
 
 - **Codebase rename logistics.** `package.json` name, `GREPLOOP_API_KEY` env var, `.greploop/` config dir, `scripts/greploop.mjs` CLI, `src/lib/llmPresets.ts` migration logic that reads `.greploop/`. Need a migration plan that doesn't break existing installs — likely read-old-if-new-doesn't-exist for one release.
-- **Demo-mode gating.** `generateRealisticFindings()` in `reviewService.ts:18` returns canned findings when no LLM is configured. Currently silent. Gate behind explicit `DEMO_MODE=true` so production misconfigurations don't silently produce fake reviews.
+- **Tree-sitter package strategy.** MVP should ship TypeScript/JavaScript tree-sitter first and add Python/Go/Rust/PHP/Ruby one at a time. Decide whether grammars are bundled in the Docker image or loaded as optional packages.
+- **Counter-evidence verifier storage.** Short term: store verifier status/counter-evidence inside `ReviewFinding.evidenceChain` JSON. Longer term: add explicit columns (`verificationStatus`, `counterEvidence`, `assumptions`) once the shape stabilizes.
 - **Ensemble reconciliation strategy.** Average ratings? Take the median? Surface the spread and let humans decide? Default should be "surface the spread" — averaging hides the most interesting signal. Needs empirical tuning once the feature ships.
 - **Cost escalation policy.** When ensembling, do all N models run on every PR, or does a cheap model run first and expensive models only escalate on disagreement/low-rating? Likely the latter for cost, but worth measuring.
 - **Embedding model for local backend.** `nomic-embed-text` is the current best local embedding model for code. Fast-moving space; re-evaluate at build time.
@@ -434,8 +474,9 @@ For single-model reviews (the current default), one `ReviewPass` is created per 
 **In scope for v1:**
 - Single-tenant install (one install = one user/team; schema doesn't preclude multi-tenant later).
 - Repo registration: local folder, manual clone, or deploy-key clone.
-- Phase 0 indexing: tree-sitter → call graph → LLM summaries → pgvector embeddings, incremental updates.
+- Phase 0 indexing: real tree-sitter parsers → call graph → LLM summaries → pgvector embeddings, incremental updates.
 - Agentic review loop with tools, producing evidence-backed findings.
+- Counter-evidence verification before findings are persisted or rendered as blockers.
 - Single-model reviews (ensemble is the headline Phase 1.5 feature, schema lands in v1).
 - Auto and mention trigger modes; pre-push git hook.
 - Cloud-API and local-Ollama backends, configurable per-repo, chat and embedding roles independent.

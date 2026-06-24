@@ -79,7 +79,7 @@ function toolsWithRepo(repo: string | null): any[] {
 }
 
 async function resolvePrFromArgs(args: any): Promise<any | null> {
-  let pr = args.number ? await findPrByIdOrNumber(args.number) : null;
+  let pr = args.number ? await findPrByIdOrNumber(args.number, args.repoId) : null;
   if (pr && args.repoId && pr.repoId !== args.repoId) pr = null;
   if (!pr && args.repoId && args.branch) pr = await findPrByBranch(args.repoId, args.branch);
   if (!pr && args.number && /^\d+$/.test(String(args.number)) && args.repoId) {
@@ -256,7 +256,7 @@ async function handleJsonRpc(body: any, defRepo: string | null) {
 
 async function resolvePr(body: any, argVal: string): Promise<any | null> {
   let pr: any = null;
-  if (argVal) pr = await findPrByIdOrNumber(argVal);
+  if (argVal) pr = await findPrByIdOrNumber(argVal, body.repoId);
   if (pr && body.repoId && pr.repoId !== body.repoId) pr = null;
   if (!pr && body.repoId && body.branch) pr = await findPrByBranch(body.repoId, body.branch);
   return pr;

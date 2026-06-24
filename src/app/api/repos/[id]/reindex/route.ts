@@ -1,12 +1,12 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/src/lib/prisma";
-import { authenticateIfExternal } from "@/src/lib/apiAuth";
+import { authenticateSessionOrKey } from "@/src/lib/apiAuth";
 import { IndexingService } from "@/src/services/indexingService";
 
 export const runtime = "nodejs";
 
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
-  const auth = await authenticateIfExternal(req);
+  const auth = await authenticateSessionOrKey(req);
   if (!auth.ok) return NextResponse.json({ error: auth.error }, { status: 401 });
   try {
     const { id } = await params;
@@ -36,7 +36,10 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
         } catch {}
       });
 
-    return NextResponse.json({ success: true, reindex: true });
+    return NextResponse.json(
+      { accepted: true, status: "stabilizing", message: "Reindex dispatched. Poll GET /api/repos/[id]/stats for completion." },
+      { status: 202 },
+    );
   } catch (err: any) {
     console.error("Failed dispatching reindex:", err);
     return NextResponse.json({ error: err.message }, { status: 500 });

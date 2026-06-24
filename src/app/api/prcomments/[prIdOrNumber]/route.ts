@@ -11,7 +11,9 @@ export async function GET(req: Request, { params }: { params: Promise<{ prIdOrNu
 
   const { prIdOrNumber } = await params;
   try {
-    const pr = await findPrByIdOrNumber(prIdOrNumber);
+    const url = new URL(req.url);
+    const repoId = url.searchParams.get("repoId") || undefined;
+    const pr = await findPrByIdOrNumber(prIdOrNumber, repoId);
     if (!pr) {
       return NextResponse.json({
         status: "Error",

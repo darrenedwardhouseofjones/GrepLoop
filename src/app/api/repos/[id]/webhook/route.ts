@@ -1,13 +1,13 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/src/lib/prisma";
-import { authenticateIfExternal } from "@/src/lib/apiAuth";
+import { authenticateSessionOrKey } from "@/src/lib/apiAuth";
 import { setupWebhookWithPat, deleteWebhook, getManualWebhookInstructions } from "@/src/lib/webhookSetup";
 
 export async function POST(
   req: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const auth = await authenticateIfExternal(req);
+  const auth = await authenticateSessionOrKey(req);
   if (!auth.ok) return NextResponse.json({ error: auth.error }, { status: 401 });
 
   try {
@@ -46,7 +46,7 @@ export async function GET(
   req: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const auth = await authenticateIfExternal(req);
+  const auth = await authenticateSessionOrKey(req);
   if (!auth.ok) return NextResponse.json({ error: auth.error }, { status: 401 });
 
   try {
@@ -69,7 +69,7 @@ export async function DELETE(
   req: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const auth = await authenticateIfExternal(req);
+  const auth = await authenticateSessionOrKey(req);
   if (!auth.ok) return NextResponse.json({ error: auth.error }, { status: 401 });
 
   try {
