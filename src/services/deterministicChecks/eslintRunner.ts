@@ -61,12 +61,18 @@ export const eslintRunner: Runner = {
 
     if (useScript) {
       // Their lint script ran — output format unknown. Be honest about it.
-      const trimmed = raw.trim();
-      if (!trimmed) return [];
+      // Strip npm's script-echo prefix ("> name@ver lint\n> cmd\n") so a
+      // clean run with no actual lint output returns [] not an info finding.
+      const stripped = raw
+        .split("\n")
+        .filter(l => !l.startsWith(">"))
+        .join("\n")
+        .trim();
+      if (!stripped) return [];
       // Try to parse as JSON anyway (many users do set --format json).
-      const parsed = tryParseJson<EslintResult[]>(trimmed);
+      const parsed = tryParseJson<EslintResult[]>(stripped);
       if (parsed) return parseEslintJson(parsed, detection.rootDir);
-      return [skippedFinding("eslint", `\`npm run lint\` produced unparseable output (${trimmed.length} chars) — review manually.`)];
+      return [skippedFinding("eslint", `\`npm run lint\` produced unparseable output (${stripped.length} chars) — review manually.`)];
     }
 
     const parsed = tryParseJson<EslintResult[]>(raw);
