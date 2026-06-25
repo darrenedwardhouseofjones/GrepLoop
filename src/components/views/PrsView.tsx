@@ -43,6 +43,11 @@ interface Props {
     triggerReason: string | null;
   } | null;
   rejectedCount?: number;
+  rejectedFindings?: Array<{
+    id: string; filename: string; line: number | null;
+    severity: string; category: string; explanation: string;
+    verificationNote: string | null;
+  }>;
   stale?: boolean;
   onCopySuggestion: (text: string, id: string) => void;
   copyFeedback: string | null;
@@ -66,6 +71,7 @@ export default function PrsView({
   findings,
   reviewRun,
   rejectedCount,
+  rejectedFindings,
   stale,
   onCopySuggestion,
   copyFeedback,
@@ -109,6 +115,7 @@ export default function PrsView({
             findings={findings}
             reviewRun={reviewRun}
             rejectedCount={rejectedCount}
+            rejectedFindings={rejectedFindings}
             stale={stale}
             onCopySuggestion={onCopySuggestion}
             copyFeedback={copyFeedback}

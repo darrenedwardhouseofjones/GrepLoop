@@ -27,6 +27,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ prId: s
       return NextResponse.json({
         reviewRun: null,
         findings: [],
+        rejectedFindings: [],
         rejectedCount: 0,
         stale: false,
         message: "No completed review yet. Run a scan.",
@@ -44,6 +45,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ prId: s
         triggerReason: latest.reviewRun.triggerReason,
       },
       findings: latest.findings,
+      rejectedFindings: latest.rejectedFindings,
       rejectedCount: latest.rejectedCount,
       stale: latest.stale,
     });

@@ -298,6 +298,7 @@ export default function App() {
                   findings={d.findings}
                   reviewRun={d.reviewRun}
                   rejectedCount={d.rejectedCount}
+                  rejectedFindings={d.rejectedFindings}
                   stale={d.stale}
                   onCopySuggestion={d.handleCopyCode}
                   copyFeedback={d.copyFeedback}

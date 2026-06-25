@@ -49,13 +49,15 @@ model Repository {
 }
 
 model ReviewLog {
-  id        String   @id
-  prId      String
-  message   String
-  level     String   // "info" | "warn" | "error" | "tool_call"
-  createdAt DateTime @default(now())
+  id            String   @id
+  prId          String
+  reviewRunId   String?  // nullable for backward compat — legacy rows have null
+  message       String
+  level         String   // "info" | "warn" | "error" | "tool_call"
+  createdAt     DateTime @default(now())
 
   @@index([prId, createdAt])
+  @@index([reviewRunId, createdAt])
   @@map("review_logs")
 }
 

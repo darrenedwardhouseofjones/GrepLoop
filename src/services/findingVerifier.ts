@@ -113,7 +113,7 @@ const DOCS_PATH_PATTERNS = [
   /(^|\/)AUTHORS/i,
 ];
 
-function isDocumentationFile(filename: string): boolean {
+export function isDocumentationFile(filename: string): boolean {
   const normalized = filename.replace(/\\/g, "/").replace(/^\.\//, "");
   const ext = path.extname(normalized).toLowerCase();
   if (DOCS_EXTENSIONS.has(ext)) return true;
@@ -168,6 +168,13 @@ async function verifyOne(
     return {
       status: "rejected",
       note: "finding has no explanation — cannot verify a claim with no rationale",
+    };
+  }
+
+  if (!finding.filename || finding.filename === "<unattributed>") {
+    return {
+      status: "rejected",
+      note: "finding did not specify a filename — the LLM emitted a finding without citing a source code file. Re-scan after strengthening the prompt.",
     };
   }
 

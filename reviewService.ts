@@ -3,7 +3,7 @@ import path from "node:path";
 import { prisma } from "./src/lib/prisma";
 import { getChatChain } from "./src/lib/llmClient";
 import { randomUUID } from "node:crypto";
-import { verifyFindings, type CandidateFinding } from "./src/services/findingVerifier";
+import { verifyFindings, isDocumentationFile, type CandidateFinding } from "./src/services/findingVerifier";
 import { completeReviewRun } from "./src/lib/reviewFreshness";
 
 export interface ScanResult {
@@ -14,10 +14,10 @@ export interface ScanResult {
   systemWarn?: string | null;
 }
 
-async function logReview(prId: string, message: string, level: string = "info") {
+async function logReview(prId: string, message: string, level: string = "info", reviewRunId?: string) {
   try {
     await prisma.reviewLog.create({
-      data: { id: randomUUID(), prId, message, level },
+      data: { id: randomUUID(), prId, message, level, reviewRunId: reviewRunId ?? null },
     });
   } catch {
     // Best-effort — never break the review for a log write failure.
@@ -271,6 +271,11 @@ Every finding MUST include:
 - A concrete code suggestion in diffSuggestion
 - Evidence chain showing how the issue propagates
 
+FILE CITATION RULE (CRITICAL):
+- Findings MUST cite source code files from the diff (sections marked \`--- FILE: <path> ---\`).
+- The diff also contains a \`=== CONTEXT FILES (NOT REVIEWABLE — DO NOT CITE IN FINDINGS) ===\` section with planning docs, READMEs, and specs. These are background context only — NEVER cite them as the location of a finding.
+- If you observe an issue described in a context file (e.g. a plan.md describes a buggy pattern), re-locate the finding to the actual implementation file in the code section. The filename field must point at real source code (.ts, .tsx, .js, .prisma, etc.), never a .md / README / CHANGELOG / .agent-os/ file.
+
 GRADING (1-10 scale):
 - 10/10 — Flawless. No security holes, no correctness bugs, no performance traps. Production-ready.
 - 9/10 — Exceptional. Only nit-level suggestions.
@@ -360,7 +365,11 @@ export async function runPrScan(prId: string, preloadedFiles?: any[], reviewRunI
     return lines.length > 500 ? numbered + "\n...[TRUNCATED]" : numbered;
   };
   const MAX_FILE_CHARS = 10000;
-  const diffPayload = files
+  const MAX_CONTEXT_LINES = 200;
+  const codeFiles = files.filter((f) => !isDocumentationFile(f.filename));
+  const contextFiles = files.filter((f) => isDocumentationFile(f.filename));
+
+  const codePayload = codeFiles
     .map(
       (f) => {
         const truncDiff = f.diff && f.diff.length > MAX_FILE_CHARS ? f.diff.slice(0, MAX_FILE_CHARS) + "\n...[TRUNCATED]" : (f.diff || "");
@@ -371,6 +380,26 @@ export async function runPrScan(prId: string, preloadedFiles?: any[], reviewRunI
       }
     )
     .join("\n\n");
+
+  const contextPayload = contextFiles.length > 0
+    ? contextFiles
+        .map((f) => {
+          const content = (f.modifiedContent || "").split("\n").slice(0, MAX_CONTEXT_LINES).join("\n");
+          const truncNote = (f.modifiedContent || "").split("\n").length > MAX_CONTEXT_LINES ? "\n...[TRUNCATED]" : "";
+          return `--- CONTEXT FILE: ${f.filename} (DO NOT CITE IN FINDINGS — for background understanding only) ---\n${content}${truncNote}\n`;
+        })
+        .join("\n\n")
+    : "";
+
+  if (codeFiles.length === 0) {
+    console.log(`[scan] runPrScan: all ${files.length} PR file(s) are docs/context — scan will proceed but expect no code findings`);
+  }
+  if (contextFiles.length > 0) {
+    console.log(`[scan] runPrScan: partitioned ${files.length} file(s) → ${codeFiles.length} code, ${contextFiles.length} context`);
+  }
+
+  const diffPayload = codePayload +
+    (contextPayload ? `\n\n=== CONTEXT FILES (NOT REVIEWABLE — DO NOT CITE IN FINDINGS) ===\n${contextPayload}\n` : "");
 
   // 6. Run agentic review loop, iterating providers in the chain.
   //    Primary first, then fallback if configured. If every provider
@@ -413,7 +442,7 @@ ${diffPayload}`;
         while (loopCount < 8 && !finalReview) {
           loopCount++;
           console.log(`[review] iteration ${loopCount}/8 provider=${name}`);
-          void logReview(prId, `Iteration ${loopCount}/8 — ${name}`, "info");
+          void logReview(prId, `Iteration ${loopCount}/8 — ${name}`, "info", reviewRunId);
           const response = await withTimeout(
             client.chat.completions.create({
               model,
@@ -470,7 +499,7 @@ ${diffPayload}`;
                 console.log(
                   `[review] submitReview received: rating=${normalized.rating} findings=${normalized.findings?.length ?? 0} provider=${name}`,
                 );
-                void logReview(prId, `submitReview: rating=${normalized.rating}, ${normalized.findings?.length ?? 0} findings`, "info");
+                void logReview(prId, `submitReview: rating=${normalized.rating}, ${normalized.findings?.length ?? 0} findings`, "info", reviewRunId);
                 finalReview = normalized;
                 break;
               }
@@ -540,10 +569,10 @@ ${diffPayload}`;
                 console.error(`Tool ${fnName} failed:`, e);
                 resultSummary = `error: ${(e as any)?.message || String(e)}`;
                 toolResult = `Tool error: ${(e as any)?.message || String(e)}`;
-                void logReview(prId, `Tool ${fnName} failed: ${(e as any)?.message || String(e)}`, "error");
+                void logReview(prId, `Tool ${fnName} failed: ${(e as any)?.message || String(e)}`, "error", reviewRunId);
               }
               console.log(`[review] tool ${fnName} → ${resultSummary}`);
-              void logReview(prId, `Tool: ${fnName} → ${resultSummary}`, "tool_call");
+              void logReview(prId, `Tool: ${fnName} → ${resultSummary}`, "tool_call", reviewRunId);
 
               messages.push({
                 role: "tool",
@@ -571,7 +600,7 @@ ${diffPayload}`;
         if (!finalReview) {
           await assertReviewRunStillActive(reviewRunId);
           console.log(`[review] attempting JSON-only finalization provider=${name}`);
-          void logReview(prId, `Attempting JSON-only finalization — ${name}`, "info");
+          void logReview(prId, `Attempting JSON-only finalization — ${name}`, "info", reviewRunId);
           const finalizerMessages = [
             ...messages,
             {
@@ -579,6 +608,8 @@ ${diffPayload}`;
               content:
                 "You did not submit the review. Return ONLY a valid JSON object now with this exact shape: " +
                 "{\"rating\": number from 1 to 10, \"summary\": string, \"findings\": array}. " +
+                "Each finding MUST include: filename (a source code file path from the diff's `--- FILE: <path> ---` sections — NEVER a .md, README, CHANGELOG, docs/, or .agent-os/ file), line (number), severity, category, explanation, diffSuggestion, confidence (0-1). " +
+                "If you cannot cite a specific source code file for a finding, omit that finding. " +
                 "If there are no issues, use findings: [] and a production-ready rating.",
             },
           ];
@@ -596,7 +627,7 @@ ${diffPayload}`;
             );
           } catch (err: any) {
             console.warn(`[review] JSON response_format finalizer failed provider=${name}: ${err.message}`);
-            void logReview(prId, `JSON response_format finalizer failed: ${err.message}`, "warn");
+            void logReview(prId, `JSON response_format finalizer failed: ${err.message}`, "warn", reviewRunId);
             finalizerResponse = await withTimeout(
               client.chat.completions.create({
                 model,
@@ -614,7 +645,7 @@ ${diffPayload}`;
             console.log(
               `[review] JSON-only finalReview received: rating=${parsed.rating} findings=${parsed.findings.length} provider=${name}`,
             );
-            void logReview(prId, `JSON finalReview: rating=${parsed.rating}, ${parsed.findings.length} findings`, "info");
+            void logReview(prId, `JSON finalReview: rating=${parsed.rating}, ${parsed.findings.length} findings`, "info", reviewRunId);
             finalReview = parsed;
           }
         }
@@ -623,7 +654,7 @@ ${diffPayload}`;
           console.log(
             `[review] loop exited without submitReview (iterations used: ${loopCount}, last message had tool_calls: ${lastHadToolCalls}) provider=${name}`,
           );
-          void logReview(prId, `Loop exhausted — no submitReview after ${loopCount} iterations (last had tool_calls: ${lastHadToolCalls})`, "warn");
+          void logReview(prId, `Loop exhausted — no submitReview after ${loopCount} iterations (last had tool_calls: ${lastHadToolCalls})`, "warn", reviewRunId);
         }
 
         if (finalReview) {
@@ -634,7 +665,7 @@ ${diffPayload}`;
         // Fall through to the next provider (if any).
       } catch (err: any) {
         console.warn(`[review] chat provider ${name} failed: ${err.message}`);
-        void logReview(prId, `Provider ${name} failed: ${err.message}`, "error");
+        void logReview(prId, `Provider ${name} failed: ${err.message}`, "error", reviewRunId);
         agenticError = `${name}: ${err.message}`;
         // try next provider
       }
@@ -677,7 +708,7 @@ ${diffPayload}`;
     id,
     category: finding.category || "Style",
     severity: finding.severity || "suggestion",
-    filename: finding.filename || files[0].filename,
+    filename: finding.filename || "<unattributed>",
     line: finding.line || null,
     explanation: finding.explanation || "",
   }));
@@ -689,6 +720,15 @@ ${diffPayload}`;
     console.log(`[scan] runPrScan: verifier rejected ${rejectedCount}/${candidates.length} finding(s)`);
   }
 
+  // If every finding was rejected, the LLM's rating was based on hallucinated
+  // or invalid observations. Null it so the UI shows "re-scan needed" rather
+  // than a misleading score with zero visible findings.
+  if (candidates.length > 0 && rejectedCount === candidates.length) {
+    console.log(`[scan] runPrScan: all ${candidates.length} findings rejected — nulling rating (was ${rating})`);
+    rating = null;
+    systemWarn = `LLM produced ${candidates.length} findings but all were rejected by the verifier (cited files missing, wrong, or documentation). Rating nulled — re-scan recommended.`;
+  }
+
   const findingsData = withIds.map(({ finding, id }) => {
     const v = verification.get(id);
     return {
@@ -698,7 +738,7 @@ ${diffPayload}`;
       repoId: pr.repoId,
       category: finding.category || "Style",
       severity: finding.severity || "suggestion",
-      filename: finding.filename || files[0].filename,
+      filename: finding.filename || "<unattributed>",
       line: finding.line || 1,
       explanation: finding.explanation || "No explanation provided.",
       diffSuggestion: finding.diffSuggestion || null,

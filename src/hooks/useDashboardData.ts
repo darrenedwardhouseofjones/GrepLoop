@@ -59,6 +59,11 @@ export function useDashboardData() {
     triggerReason: string | null;
   } | null>(null);
   const [rejectedCount, setRejectedCount] = useState(0);
+  const [rejectedFindings, setRejectedFindings] = useState<Array<{
+    id: string; filename: string; line: number | null;
+    severity: string; category: string; explanation: string;
+    verificationNote: string | null;
+  }>>([]);
   const [stale, setStale] = useState(false);
   const [logs, setLogs] = useState<ActivityLog[]>([]);
 
@@ -143,6 +148,7 @@ export function useDashboardData() {
       setFindings([]);
       setReviewRun(null);
       setRejectedCount(0);
+      setRejectedFindings([]);
       setStale(false);
     }
 
@@ -200,6 +206,7 @@ export function useDashboardData() {
       setFindings([]);
       setReviewRun(null);
       setRejectedCount(0);
+      setRejectedFindings([]);
       setStale(false);
     }
     try {
@@ -225,12 +232,14 @@ export function useDashboardData() {
         setFindings(findingsData.findings);
         setReviewRun(findingsData.reviewRun ?? null);
         setRejectedCount(findingsData.rejectedCount ?? 0);
+        setRejectedFindings(findingsData.rejectedFindings ?? []);
         setStale(Boolean(findingsData.stale));
       } else if (Array.isArray(findingsData)) {
         // Backward compat with older route shape.
         setFindings(findingsData);
         setReviewRun(null);
         setRejectedCount(0);
+        setRejectedFindings([]);
         setStale(false);
       }
     } catch (e) {
@@ -579,6 +588,7 @@ export function useDashboardData() {
     findings,
     reviewRun,
     rejectedCount,
+    rejectedFindings,
     stale,
     logs,
     fetchPrsForSelectedRepo,

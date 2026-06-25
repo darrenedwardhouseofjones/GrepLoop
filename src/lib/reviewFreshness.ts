@@ -64,6 +64,15 @@ export interface LatestReviewResult {
     timestamp: string;
   }>;
   rejectedCount: number;
+  rejectedFindings: Array<{
+    id: string;
+    filename: string;
+    line: number | null;
+    severity: string;
+    category: string;
+    explanation: string;
+    verificationNote: string | null;
+  }>;
   stale: boolean;
 }
 
@@ -272,6 +281,7 @@ export async function getLatestCompletedReview(
     return {
       reviewRun: null,
       findings: [],
+      rejectedFindings: [],
       rejectedCount: 0,
       stale: false,
     };
@@ -284,7 +294,7 @@ export async function getLatestCompletedReview(
   const currentDiffHash = computeDiffHash(prFiles);
   const stale = latestRun.diffHash !== "" && latestRun.diffHash !== currentDiffHash;
 
-  const [findings, rejectedCount] = await Promise.all([
+  const [findings, rejectedFindings] = await Promise.all([
     prisma.reviewFinding.findMany({
       where: {
         reviewRunId: latestRun.id,
@@ -295,15 +305,21 @@ export async function getLatestCompletedReview(
       },
       orderBy: { line: "asc" },
     }),
-    prisma.reviewFinding.count({
+    prisma.reviewFinding.findMany({
       where: { reviewRunId: latestRun.id, verificationStatus: "rejected" },
+      orderBy: { line: "asc" },
+      select: {
+        id: true, filename: true, line: true, severity: true, category: true,
+        explanation: true, verificationNote: true,
+      },
     }),
   ]);
 
   return {
     reviewRun: latestRun,
     findings,
-    rejectedCount,
+    rejectedFindings,
+    rejectedCount: rejectedFindings.length,
     stale,
   };
 }

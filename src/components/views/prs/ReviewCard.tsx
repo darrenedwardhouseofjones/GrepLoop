@@ -42,6 +42,11 @@ interface Props {
   findings: ReviewFinding[];
   reviewRun?: ReviewRunMeta | null;
   rejectedCount?: number;
+  rejectedFindings?: Array<{
+    id: string; filename: string; line: number | null;
+    severity: string; category: string; explanation: string;
+    verificationNote: string | null;
+  }>;
   stale?: boolean;
   onCopySuggestion: (text: string, id: string) => void;
   copyFeedback: string | null;
@@ -109,7 +114,7 @@ function parseEvidence(chain: ReviewFinding["evidenceChain"]): Array<{ file: str
   }
 }
 
-export default function ReviewCard({ activePR, findings, reviewRun, rejectedCount, stale, onCopySuggestion, copyFeedback }: Props) {
+export default function ReviewCard({ activePR, findings, reviewRun, rejectedCount, rejectedFindings, stale, onCopySuggestion, copyFeedback }: Props) {
   const [copiedAll, setCopiedAll] = useState(false);
   const [showRejected, setShowRejected] = useState(false);
   const handleCopyAll = useCallback(() => {
@@ -190,15 +195,29 @@ export default function ReviewCard({ activePR, findings, reviewRun, rejectedCoun
       {/* Empty state */}
       {findings.length === 0 ? (
         <div className="p-8 text-center text-slate-500 flex flex-col items-center justify-center">
-          <CheckCircle2 size={24} className="text-emerald-400 mb-1.5" />
-          <p className="text-xs font-bold text-slate-300 font-mono">
-            {reviewRun ? "Review complete: no findings" : "Status: Ready for review scan"}
-          </p>
-          <p className="text-[10px] text-slate-600 font-mono mt-0.5">
-            {reviewRun
-              ? "This scan did not find any active alerts for the current report."
-              : "Click \"Trigger AI Review Scan\" to run real-time static checking."}
-          </p>
+          {reviewRun && reviewRun.rating === null ? (
+            <>
+              <ShieldAlert size={24} className="text-amber-400 mb-1.5" />
+              <p className="text-xs font-bold text-amber-300 font-mono">
+                Rating unreliable — verifier rejected all findings
+              </p>
+              <p className="text-[10px] text-slate-500 font-mono mt-0.5 max-w-md">
+                The LLM produced findings but none passed verification (cited files were missing, wrong, or documentation). Re-scan recommended — expand the rejected list below for details.
+              </p>
+            </>
+          ) : (
+            <>
+              <CheckCircle2 size={24} className="text-emerald-400 mb-1.5" />
+              <p className="text-xs font-bold text-slate-300 font-mono">
+                {reviewRun ? "Review complete: no findings" : "Status: Ready for review scan"}
+              </p>
+              <p className="text-[10px] text-slate-600 font-mono mt-0.5">
+                {reviewRun
+                  ? "This scan did not find any active alerts for the current report."
+                  : "Click \"Trigger AI Review Scan\" to run real-time static checking."}
+              </p>
+            </>
+          )}
         </div>
       ) : (
         <div className="divide-y divide-white/5 max-h-[70vh] overflow-y-auto">
@@ -315,18 +334,38 @@ export default function ReviewCard({ activePR, findings, reviewRun, rejectedCoun
             onClick={() => setShowRejected((v) => !v)}
             className="w-full px-4 py-2 flex items-center justify-between text-left hover:bg-white/[0.02] transition-colors cursor-pointer"
           >
-            <span className="text-[10px] font-mono uppercase tracking-wider text-slate-500 flex items-center gap-1.5">
-              <ShieldAlert size={11} className="text-slate-600" />
-              Verifier filtered: {rejectedCount} finding{(rejectedCount ?? 0) === 1 ? "" : "s"}
+            <span className="text-[10px] font-mono uppercase tracking-wider text-amber-400/80 flex items-center gap-1.5">
+              <ShieldAlert size={11} className="text-amber-500" />
+              Verifier rejected: {rejectedCount} finding{(rejectedCount ?? 0) === 1 ? "" : "s"}
+              {reviewRun?.rating === null && (
+                <span className="ml-2 text-rose-400 normal-case tracking-normal">
+                  · rating nulled (all findings rejected)
+                </span>
+              )}
             </span>
-            <span className="text-[10px] font-mono text-slate-600">
+            <span className="text-[10px] font-mono text-slate-500">
               {showRejected ? "▲ hide" : "▼ show"}
             </span>
           </button>
-          {showRejected && (
-            <div className="px-4 py-2 text-[10px] font-mono text-slate-600 italic border-t border-white/5">
-              Rejected findings are kept for audit but hidden from the main list.
-              Use <code className="text-slate-500">?force=true</code> on the scan endpoint to bypass the cache and re-verify.
+          {showRejected && (rejectedFindings?.length ?? 0) > 0 && (
+            <div className="divide-y divide-white/5 border-t border-white/5">
+              {rejectedFindings!.map((f) => (
+                <div key={f.id} className="px-4 py-2.5 opacity-70">
+                  <div className="flex items-center gap-2 text-[10px] font-mono mb-1">
+                    <span className="line-through text-slate-500">{f.filename}:{f.line ?? "?"}</span>
+                    <span className="text-[8px] uppercase tracking-wider bg-amber-500/10 text-amber-400 border border-amber-500/25 px-1 py-0.5 rounded">
+                      rejected
+                    </span>
+                    <span className="text-[8px] uppercase tracking-wider text-slate-600">{f.severity}/{f.category}</span>
+                  </div>
+                  <div className="text-[10px] text-amber-300/70 italic font-mono mb-1">
+                    {f.verificationNote || "no verifier note"}
+                  </div>
+                  <div className="text-[10px] text-slate-500 font-mono leading-relaxed">
+                    {f.explanation.slice(0, 280)}{f.explanation.length > 280 ? "…" : ""}
+                  </div>
+                </div>
+              ))}
             </div>
           )}
         </div>
