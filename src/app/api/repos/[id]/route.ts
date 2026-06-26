@@ -3,8 +3,11 @@ import { prisma } from "@/src/lib/prisma";
 import { encryptSecret, hasMasterKey } from "@/src/lib/crypto";
 import { enqueue } from "@/src/services/remoteFetchWorker";
 import { getProviderFromUrl } from "@/src/lib/webhookSetup";
+import { authenticateSessionOrKey } from "@/src/lib/apiAuth";
 
-export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
+export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
+  const auth = await authenticateSessionOrKey(req);
+  if (!auth.ok) return NextResponse.json({ error: auth.error }, { status: 401 });
   try {
     const { id } = await params;
     const repo = await prisma.repository.findUnique({ where: { id } });
@@ -19,6 +22,8 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
 }
 
 export async function PUT(req: Request, { params }: { params: Promise<{ id: string }> }) {
+  const auth = await authenticateSessionOrKey(req);
+  if (!auth.ok) return NextResponse.json({ error: auth.error }, { status: 401 });
   try {
     const { id } = await params;
     const body = await req.json();
@@ -92,6 +97,17 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
     }
 
     if (typeof cloneUrl === "string" && cloneUrl !== current.cloneUrl) {
+      const HTTPS_URL_RE = /^https:\/\/[a-zA-Z0-9.-]+\/.+$/;
+      const SSH_URL_RE = /^[a-zA-Z0-9._-]+@[a-zA-Z0-9.-]+:.+$/;
+      if (cloneUrl && !HTTPS_URL_RE.test(cloneUrl) && !SSH_URL_RE.test(cloneUrl)) {
+        return NextResponse.json(
+          { error: "cloneUrl must be HTTPS (https://host/path) or SSH (user@host:path)." },
+          { status: 400 },
+        );
+      }
+      if (cloneUrl && /[\0-\x1f]/.test(cloneUrl)) {
+        return NextResponse.json({ error: "Invalid characters in cloneUrl." }, { status: 400 });
+      }
       updateData.cloneUrl = cloneUrl;
     }
     if (typeof cloneUrlHttps === "string" && cloneUrlHttps !== (current.cloneUrlHttps || "")) {
@@ -152,7 +168,9 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
   }
 }
 
-export async function DELETE(_req: Request, { params }: { params: Promise<{ id: string }> }) {
+export async function DELETE(req: Request, { params }: { params: Promise<{ id: string }> }) {
+  const auth = await authenticateSessionOrKey(req);
+  if (!auth.ok) return NextResponse.json({ error: auth.error }, { status: 401 });
   try {
     const { id } = await params;
     await prisma.repository.deleteMany({ where: { id } });

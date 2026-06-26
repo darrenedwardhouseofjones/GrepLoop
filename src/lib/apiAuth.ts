@@ -34,10 +34,15 @@ export async function authenticateApiRequest(req: Request): Promise<{ ok: boolea
     return { ok: false, error: "API key not found or has been revoked." };
   }
 
-  await prisma.apiKey.update({
-    where: { id: key.id },
-    data: { lastUsedAt: new Date() },
-  });
+  // Throttle lastUsedAt updates to once per 5 min per key — high-traffic
+  // CLI usage was causing 1 write per request. Fire-and-forget so request
+  // latency doesn't depend on the write.
+  const lastMs = key.lastUsedAt ? new Date(key.lastUsedAt).getTime() : 0;
+  if (Date.now() - lastMs > 5 * 60_000) {
+    prisma.apiKey
+      .update({ where: { id: key.id }, data: { lastUsedAt: new Date() } })
+      .catch(() => {});
+  }
 
   return { ok: true };
 }

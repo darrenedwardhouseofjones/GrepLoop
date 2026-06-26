@@ -20,7 +20,12 @@
 import { assertNoActiveScan } from "./reviewFreshness";
 
 const activeReviews = new Map<string, number>();
-const REVIEW_TTL_MS = 5 * 60 * 1000;
+// Aligned with SCAN_STALE_AFTER_MS (30 min) in reviewFreshness.ts. The
+// previous 5 min TTL was shorter than a legitimate 16-iteration agentic
+// scan, causing duplicate scans to start while the original was still
+// running. The DB-backed assertNoActiveScan is the authoritative check;
+// this in-memory map is only a fast-path optimization.
+const REVIEW_TTL_MS = 30 * 60 * 1000;
 
 export function isReviewActive(prId: string): boolean {
   const startedAt = activeReviews.get(prId);

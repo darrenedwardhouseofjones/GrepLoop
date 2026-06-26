@@ -13,7 +13,12 @@ import { requireSession } from "@/src/lib/api-auth";
  * GET /api/llm/presets
  * Returns the full preset list with apiKeys masked. Safe for client use.
  */
-export async function GET() {
+export async function GET(req: Request) {
+  try {
+    await requireSession(req);
+  } catch {
+    return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
+  }
   try {
     return NextResponse.json(listPresets());
   } catch (err: any) {

@@ -7,6 +7,7 @@ import { getRealLocalPrs } from "@/src/lib/getRealLocalPrs";
 import { encryptSecret, hasMasterKey } from "@/src/lib/crypto";
 import { enqueue } from "@/src/services/remoteFetchWorker";
 import { getProviderFromUrl } from "@/src/lib/webhookSetup";
+import { authenticateSessionOrKey } from "@/src/lib/apiAuth";
 
 /**
  * Writes `.greploop/repo-id` into the repo directory after registration so
@@ -30,7 +31,9 @@ function writeRepoIdMarker(repoPath: string, repoId: string): void {
   }
 }
 
-export async function GET() {
+export async function GET(req: Request) {
+  const auth = await authenticateSessionOrKey(req);
+  if (!auth.ok) return NextResponse.json({ error: auth.error }, { status: 401 });
   try {
     const reposRaw = await prisma.repository.findMany({
       include: { _count: { select: { pullRequests: true } } },
