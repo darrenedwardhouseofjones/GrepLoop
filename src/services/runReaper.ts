@@ -1,5 +1,5 @@
-import { prisma } from "@/src/lib/prisma";
-import { SCAN_STALE_AFTER_MS } from "@/src/lib/reviewFreshness";
+import { prisma } from "../lib/prisma";
+import { SCAN_STALE_AFTER_MS } from "../lib/reviewFreshness";
 
 /**
  * Stale-run reaper.
