@@ -371,13 +371,14 @@ export class IndexingService {
           // Defense-in-depth: sym.filePath comes from the indexer (relative
           // paths) but a future schema change or compromised DB write could
           // inject an absolute path or `..` traversal. resolveSafePath
-          // returns null if the path escapes the repo (and also follows
-          // symlinks to detect escape).
-          const safePath = resolveSafePath(resolvedPath, sym.filePath);
-          if (!safePath) continue;
-          if (!fs.existsSync(safePath)) continue;
+          // returns null if the candidate is absolute, contains .. that
+          // escapes, or is a symlink pointing outside. A non-null return
+          // IS the bound check.
+          const safePathInsideRepo = resolveSafePath(resolvedPath, sym.filePath);
+          if (safePathInsideRepo === null) continue;
+          if (!fs.existsSync(safePathInsideRepo)) continue;
 
-          const lines = fs.readFileSync(safePath, "utf-8").split("\n");
+          const lines = fs.readFileSync(safePathInsideRepo, "utf-8").split("\n");
           const end = Math.min(sym.lineEnd, sym.lineStart + 300, lines.length);
           const sourceCode = lines
             .slice(Math.max(0, sym.lineStart - 1), end)

@@ -14,6 +14,19 @@ if (!globalForPrisma.__prismaPool) {
   const wantsStrictSsl = Boolean(
     cs.match(/sslmode\s*=\s*(verify-full|verify-ca)/i),
   );
+  // Local Postgres (dev container, system cluster, embedded) doesn't speak
+  // TLS by default — handing pg an `ssl: {}` object makes it try STARTTLS
+  // and fail with "server does not support SSL". Detect:
+  //   1. explicit `sslmode=disable` in the URL, OR
+  //   2. host is loopback / localhost / *.local
+  // and pass `ssl: false` so pg opens a plain TCP connection.
+  const wantsNoSsl =
+    Boolean(cs.match(/sslmode\s*=\s*(disable|allow|prefer)/i)) ||
+    Boolean(
+      cs.match(
+        /@(localhost|127\.[\d.]+|::1|\[::1\]|[a-z0-9.-]+\.local)(:\d+)?\//i,
+      ),
+    );
   const stripped = cs
     .replace(/&?sslmode=[^&]*/gi, "")
     .replace(/\?&/, "?")
@@ -21,9 +34,11 @@ if (!globalForPrisma.__prismaPool) {
     .replace(/&&/g, "&");
   globalForPrisma.__prismaPool = new Pool({
     connectionString: stripped,
-    ssl: wantsStrictSsl
-      ? { rejectUnauthorized: true }
-      : { rejectUnauthorized: false },
+    ssl: wantsNoSsl
+      ? false
+      : wantsStrictSsl
+        ? { rejectUnauthorized: true }
+        : { rejectUnauthorized: false },
   });
 }
 

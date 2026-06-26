@@ -264,13 +264,17 @@ function loadFileContent(
   // vast majority of findings cite files that still exist on disk.
   //
   // filename is LLM-cited via submitReview — untrusted. Path traversal
-  // defense via resolveSafePath (absolute path, .., and symlink escape).
-  // Without this, an attacker-controlled LLM (prompt injection via PR
-  // diff) could read /etc/passwd by submitting it as the filename.
-  const safe = resolveSafePath(repoPath, filename);
-  if (!safe) return null;
+  // defense via resolveSafePath, which returns null if the candidate:
+  //   - is absolute (path.join would discard repoPath)
+  //   - contains .. that escapes the repo
+  //   - is a symlink pointing outside the repo
+  // A non-null return GUARANTEES the resolved path is inside repoPath —
+  // this IS the bound check. Without it, a prompt-injected LLM could
+  // submit "/etc/passwd" as filename.
+  const safePathInsideRepo = resolveSafePath(repoPath, filename);
+  if (safePathInsideRepo === null) return null;
   try {
-    return fs.readFileSync(safe, "utf-8");
+    return fs.readFileSync(safePathInsideRepo, "utf-8");
   } catch {
     return null;
   }
