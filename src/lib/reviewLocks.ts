@@ -19,6 +19,9 @@
  */
 import { assertNoActiveScan } from "./reviewFreshness";
 
+// Active reviews tracked in-memory. Module-level state — survives hot
+// reloads in dev unless this file is edited. To force-clear (e.g. after
+// a successful scan that leaked the lock), edit this comment + save.
 const activeReviews = new Map<string, number>();
 // Aligned with SCAN_STALE_AFTER_MS (30 min) in reviewFreshness.ts. The
 // previous 5 min TTL was shorter than a legitimate 16-iteration agentic
