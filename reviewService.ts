@@ -125,6 +125,20 @@ const VALID_SEVERITIES = ["blocker", "warning", "suggestion"];
 // Override per-deployment via env if you need longer (e.g. for very large
 // diffs or slower models): LLM_CALL_TIMEOUT_MS=600000 in .env.local.
 const LLM_CALL_TIMEOUT_MS = Number(process.env.LLM_CALL_TIMEOUT_MS) || 300_000;
+// How many consecutive empty responses from the same provider we tolerate
+// before giving up. Some OpenAI-compatible providers occasionally return
+// choices[0] with no `message` field on transient failures (network glitch,
+// upstream hiccup, mid-stream truncation). Without this guard, a single
+// empty response kills the whole review. With it, we nudge the model with
+// a "please continue" message and retry without burning the iteration budget.
+//
+// This is provider-agnostic — applies to any chat model the user configures
+// (OpenRouter, Ollama, Minimax, LM Studio, etc.) as long as it supports
+// tool calls. Models that don't support tool calls will fail regardless
+// (see CLAUDE.md "Model X ended the agentic loop" troubleshooting).
+//
+// Override per-deployment: EMPTY_RESPONSE_RETRIES=3 in .env.local.
+const EMPTY_RESPONSE_RETRIES = Number(process.env.EMPTY_RESPONSE_RETRIES) || 2;
 
 async function withTimeout<T>(promise: Promise<T>, label: string): Promise<T> {
   let timeout: ReturnType<typeof setTimeout> | undefined;
@@ -480,11 +494,17 @@ ${diffPayload}${deterministicPayload}`;
 
         let loopCount = 0;
         let lastHadToolCalls = false;
+        let consecutiveEmptyResponses = 0;
+        // Iteration budget. 8 was too tight — observed Minimax-M3 spend all
+        // 8 iterations exploring files (readFile × 7) and never reach
+        // submitReview. 16 leaves headroom for exploration + synthesis on
+        // mid-tier models; strong models (Claude/GPT-4) finish in 3-5.
+        const ITERATION_BUDGET = 16;
 
-        while (loopCount < 8 && !finalReview) {
+        while (loopCount < ITERATION_BUDGET && !finalReview) {
           loopCount++;
-          console.log(`[review] iteration ${loopCount}/8 provider=${name}`);
-          void logReview(prId, `Iteration ${loopCount}/8 — ${name}`, "info", reviewRunId);
+          console.log(`[review] iteration ${loopCount}/${ITERATION_BUDGET} provider=${name}`);
+          void logReview(prId, `Iteration ${loopCount}/${ITERATION_BUDGET} — ${name}`, "info", reviewRunId);
           const response = await withTimeout(
             client.chat.completions.create({
               model,
@@ -504,7 +524,29 @@ ${diffPayload}${deterministicPayload}`;
           await assertReviewRunStillActive(reviewRunId);
 
           const msg = response.choices?.[0]?.message;
-          if (!msg) break;
+          if (!msg) {
+            // Provider returned a response with no message — transient
+            // failure on some OpenAI-compatible endpoints. Nudge the model
+            // with a "please continue" message and retry without burning
+            // the iteration budget. After EMPTY_RESPONSE_RETRIES consecutive
+            // empties, give up (likely the model can't follow the agentic
+            // loop at all — see systemWarn below).
+            consecutiveEmptyResponses++;
+            if (consecutiveEmptyResponses > EMPTY_RESPONSE_RETRIES) {
+              console.warn(`[review] ${EMPTY_RESPONSE_RETRIES + 1} consecutive empty responses from ${name} — giving up`);
+              void logReview(prId, `Aborted: ${EMPTY_RESPONSE_RETRIES + 1} empty responses in a row from ${name}`, "warn", reviewRunId);
+              break;
+            }
+            console.warn(`[review] empty response from ${name} on iteration ${loopCount} (attempt ${consecutiveEmptyResponses}/${EMPTY_RESPONSE_RETRIES + 1}) — nudging and retrying`);
+            void logReview(prId, `Empty response from ${name}, retrying (${consecutiveEmptyResponses}/${EMPTY_RESPONSE_RETRIES + 1})`, "warn", reviewRunId);
+            messages.push({
+              role: "user",
+              content: "Your previous response contained no message body. Continue the review: call a tool (readFile, searchCodebase, getCallers, findSimilar) to investigate the diff, then end with submitReview.",
+            });
+            loopCount--;  // Don't burn iteration budget on a transient empty.
+            continue;
+          }
+          consecutiveEmptyResponses = 0;  // Reset on any successful response.
           messages.push(msg);
           lastHadToolCalls = Boolean(msg.tool_calls && msg.tool_calls.length > 0);
 
@@ -742,7 +784,7 @@ ${diffPayload}${deterministicPayload}`;
     } else if (agenticError) {
       systemWarn = `All chat providers failed (last error: ${agenticError}). Check your internet connection and LLM Settings.`;
     } else {
-      systemWarn = `Model ${usedModel} ended the agentic loop without calling submitReview. Check that the model supports tool calling, or pick a different model in LLM Settings.`;
+      systemWarn = `Model ${usedModel} ended the agentic loop without calling submitReview. The model MUST support tool/function calling — verify this in the provider's docs, or pick a different model in LLM Settings. Models known to work: GPT-4, Claude, Qwen-Plus, DeepSeek-V3 via OpenRouter.`;
     }
   }
 
