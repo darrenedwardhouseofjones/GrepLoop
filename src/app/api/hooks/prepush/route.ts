@@ -157,6 +157,13 @@ export async function POST(req: Request) {
 
     const passed = result.rating >= 8;
 
+    // Release the in-memory lock on the success path. Previously this was
+    // only released in the catch block — every successful pre-push scan
+    // leaked an entry in `activeReviews`, blocking re-reviews for 30 min
+    // (REVIEW_TTL_MS) until TTL eviction. Bug surfaced when iter 6 ran
+    // successfully and iter 7's prepush 409'd with "(in-memory)".
+    if (acquiredLock && prIdForCleanup) endReview(prIdForCleanup);
+
     return NextResponse.json({
       passed,
       rating: result.rating,
