@@ -25,6 +25,18 @@ import crypto from "node:crypto";
 import { randomUUID } from "node:crypto";
 import { prisma } from "./prisma";
 
+/**
+ * Max wall-clock time a scan is allowed to run before being treated as
+ * orphaned. Real scans typically finish in 2-8 min; the headroom absorbs
+ * slow providers + large PRs. If a ReviewRun is older than this and still
+ * `in_progress`, the process that started it is gone (dev server restart,
+ * crash, OOM kill, serverless cold-start eviction) and the row is stale.
+ *
+ * Layer 2 (assertNoActiveScan) reaps on demand when a new scan would trip
+ * on the orphan; Layer 3 (src/services/runReaper.ts) reaps on cold start.
+ */
+export const SCAN_STALE_AFTER_MS = 30 * 60 * 1000;
+
 /** Minimal shape of what refreshPrFiles returns. Avoids a circular import. */
 export interface DiffHashInput {
   filename: string;
@@ -257,6 +269,37 @@ export async function assertNoActiveScan(
     select: { id: true, startedAt: true, triggerReason: true, model: true },
   });
   if (!inProgress) return { ok: true };
+
+  // Layer 2: stale-run auto-recover. If the in_progress run is older than
+  // SCAN_STALE_AFTER_MS, the process that owned it is gone — reap it and
+  // let this scan proceed. Without this, a crashed/killed dev server
+  // permanently bricks the PR (the operator would need `?force=true` or
+  // manual DB intervention to recover).
+  const ageMs = Date.now() - inProgress.startedAt.getTime();
+  if (ageMs > SCAN_STALE_AFTER_MS) {
+    try {
+      await prisma.reviewRun.update({
+        where: { id: inProgress.id },
+        data: { status: "failed", completedAt: new Date() },
+      });
+      console.warn(
+        `[reviewFreshness] reaped stale in_progress run ${inProgress.id} ` +
+          `(age=${Math.round(ageMs / 60_000)}min, prId=${prId}) — original ` +
+          `trigger=${inProgress.triggerReason ?? "unknown"}, marked failed ` +
+          `so the new scan can proceed.`,
+      );
+    } catch (err) {
+      // Reap failed (DB write error, concurrent reaper, etc.). Don't block
+      // the new scan — fall through to the 409 path so the operator sees
+      // the original run ID and can investigate manually.
+      console.error(
+        `[reviewFreshness] failed to reap stale run ${inProgress.id}:`,
+        err,
+      );
+    }
+    return { ok: true };
+  }
+
   return {
     ok: false,
     runId: inProgress.id,
