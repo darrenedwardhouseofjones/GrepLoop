@@ -24,24 +24,38 @@ export function verifyGitlabToken(token: string, secret: string): boolean {
 }
 
 export async function findRepoByCloneUrl(cloneUrl: string): Promise<{ id: string; localPath: string | null; webhookSecret: string | null } | null> {
-  // DB-only match. Previously this function fell back to spawning a git
-  // subprocess per repo for any repo without a stored cloneUrl — that
-  // turned an unauthenticated webhook POST into N×5s of work BEFORE the
-  // signature check ran (DoS amplification). Local-only repos (no stored
-  // cloneUrl) don't receive webhooks anyway — they have no public endpoint
-  // to be reached from. Drop the subprocess fallback.
-  const repos = await prisma.repository.findMany({
-    select: { id: true, path: true, localPath: true, cloneUrl: true, webhookSecret: true },
-    where: { cloneUrl: { not: null } },
-  });
+  // DB-side match. Two prior DoS amplification bugs lived here:
+  //   1. (removed) git subprocess per repo without a stored cloneUrl, paid
+  //      BEFORE the signature check.
+  //   2. (fixed here) findMany({ where: { cloneUrl: { not: null } } })
+  //      loaded every repo row into memory and matched in JS — every
+  //      unauthenticated webhook POST paid O(N) row serialization before
+  //      HMAC verify. Now an indexed equality lookup returning 0-1 rows.
+  //
+  // We try the exact clone_url first (what GitHub sends), then the
+  // .git-stripped form (some send git@...:foo/bar.git, others git@...:foo/bar).
   const normalizedClone = cloneUrl.replace(/\.git$/, "");
 
-  for (const repo of repos) {
-    if (!repo.cloneUrl) continue;
-    if (repo.cloneUrl === cloneUrl || repo.cloneUrl.replace(/\.git$/, "") === normalizedClone) {
-      return { id: repo.id, localPath: repo.localPath || repo.path, webhookSecret: repo.webhookSecret };
+  const select = { id: true, path: true, localPath: true, cloneUrl: true, webhookSecret: true } as const;
+
+  const exact = await prisma.repository.findFirst({
+    select,
+    where: { cloneUrl },
+  });
+  if (exact) {
+    return { id: exact.id, localPath: exact.localPath || exact.path, webhookSecret: exact.webhookSecret };
+  }
+
+  if (normalizedClone !== cloneUrl) {
+    const stripped = await prisma.repository.findFirst({
+      select,
+      where: { cloneUrl: normalizedClone },
+    });
+    if (stripped) {
+      return { id: stripped.id, localPath: stripped.localPath || stripped.path, webhookSecret: stripped.webhookSecret };
     }
   }
+
   return null;
 }
 

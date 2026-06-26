@@ -48,7 +48,6 @@
  * needs_verification/false_positive) deferred to a follow-on spec.
  */
 
-import fs from "node:fs";
 import path from "node:path";
 import { prisma } from "@/src/lib/prisma";
 import { safeReadFileSync } from "@/src/lib/pathSafety";
@@ -375,17 +374,14 @@ function candidateCounterEvidenceFiles(finding: CandidateFinding, family: Family
 }
 
 function loadRelativeFile(repoPath: string, relativePath: string): string | null {
-  const absolutePath = path.resolve(repoPath, relativePath);
-  const resolvedRepoPath = path.resolve(repoPath);
-  if (!absolutePath.startsWith(resolvedRepoPath + path.sep) && absolutePath !== resolvedRepoPath) {
-    return null;
-  }
-
-  try {
-    return fs.readFileSync(absolutePath, "utf-8");
-  } catch {
-    return null;
-  }
+  // Counter-evidence file paths come from candidateCounterEvidenceFiles
+  // (repo-relative, hardcoded) — but delegate to safeReadFileSync anyway
+  // for consistency with loadFileContent above. The previous
+  // `startsWith(resolvedRepoPath + path.sep)` check was the lexical-prefix
+  // anti-pattern pathSafety.ts:18 warns against (sibling-directory escape
+  // like /home/u/myrepo-vs-/home/u/myrepo-secrets), and also broke on
+  // Windows path.sep and case-insensitive filesystems.
+  return safeReadFileSync(repoPath, relativePath);
 }
 
 const COUNTER_EVIDENCE_PATTERNS: Record<Family, string[]> = {
