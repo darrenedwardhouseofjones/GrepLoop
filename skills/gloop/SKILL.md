@@ -6,117 +6,146 @@ user-invocable: true
 
 # GrepLoop (`/gloop`)
 
-GrepLoop is a self-hosted AI code review engine. It indexes the codebase, builds a call graph, and runs an agentic review loop with tool access to find bugs, security issues, and correctness problems — producing findings backed by evidence chains.
+GrepLoop is a self-hosted AI code review engine. It indexes the codebase, builds a call graph, and runs an agentic review loop with tool access to find bugs, security issues, and correctness problems.
 
-You drive it through the GrepLoop HTTP API. Reviews start asynchronously — poll `prcheckstatus` until the run completes (typically 30-120s for a full agentic loop).
+You drive it through the GrepLoop HTTP API at `http://localhost:3300` (override via `GREPLOOP_URL`). Reviews run asynchronously — `prcheck` starts a scan and returns immediately; `prcheckstatus` polls for completion or returns cached results.
 
 ## Commands
 
-All commands live under `/gloop`:
-
 | Command | What it does |
 |---|---|
-| `/gloop` | List all PRs for the current repo with ratings. Lets the user pick one. |
-| `/gloop <number>` | Review a specific PR. Returns rating 1-10 + findings with confidence scores. |
-| `/gloop status <number>` | Show existing review results without triggering a new scan. |
-| `/gloop fix <number>` | Auto-fix loop: review → fix → re-review until rating >= 8/10. |
-| `/gloop fix <number> --once` | Single pass: fix all findings above 0.5 confidence, commit, done. |
-| `/gloop help` | Print this command table. Use whenever the user asks what `/gloop` can do. |
+| `/gloop` | List PRs for the current repo with ratings. |
+| `/gloop <n>` | Review PR #N. Cache-aware — returns existing results if diff unchanged, starts new scan otherwise. |
+| `/gloop status <n>` | Show existing review for PR #N. Never triggers a new scan. |
+| `/gloop fix <n>` | Auto-fix loop: review → fix → re-review until rating >= 8/10. |
+| `/gloop fix <n> --once` | Single pass: fix all findings, commit, done. |
+| `/gloop help` | Print this table. |
 
-Typical workflow: `/gloop` → see PR list → `/gloop 2` → see it's 4/10 → `/gloop fix 2` → loop until 8/10.
+Typical workflow: `/gloop` → pick a PR → `/gloop 1` → see rating → `/gloop fix 1` until 8+/10.
 
-## How `/gloop` resolves the repo
+## Resolving the repoId
 
-Detect the current repo from the working directory and resolve it to a GrepLoop `repoId` via `GET /api/repos/resolve?dir=<pwd-url-encoded>`. If the API returns null, say "This project is not registered in GrepLoop" and stop. Otherwise use the resolved repoId for subsequent calls.
+The skill needs the GrepLoop `repoId` for the current project. It's a string like `greploop-1782121720477` (slug + timestamp).
 
-Dispatch on `$ARGUMENTS`:
-- `help` (or `-h`, `--help`) → print the command table above and stop. Do not call any API.
-- Empty → list mode
-- `status <number>` → status mode
-- `fix <number> [--once]` → fix mode
-- `<number>` → review mode
+Resolve in this order:
+1. `GREPLOOP_REPO_ID` env var (preferred — set it in shell rc or project `.env.local`).
+2. `cat .greploop/repo-id` if the file exists (write it once during onboarding).
+3. If neither is set, **stop and tell the user**: "Set `GREPLOOP_REPO_ID` to your repo's ID (find it in the GrepLoop dashboard URL: `/repos/<repoId>`), or run `/gloop help` for setup instructions." Do NOT try to call `/api/repos/resolve` — it requires a browser session cookie and will 401 against an API key.
 
 ## Auth
 
-All API endpoints require an API key in the `Authorization` header:
+Every call needs `Authorization: Bearer gl_<key>` (or legacy `gl_mcp_<key>` — both work). Read it from `GREPLOOP_API_KEY`. If unset, stop and tell the user: "Set `GREPLOOP_API_KEY` — generate one from the GrepLoop UI → Settings → API Keys."
+
+## API shape (legacy command endpoint)
+
+All commands POST to `http://localhost:3300/api/command` with this body:
+```json
+{ "command": "<subcommand> <arg>", "repoId": "<repoId>" }
 ```
-Authorization: Bearer gl_<your_key>
+
+The `<arg>` is a PR `id` (preferred) or `branch` — both accepted. Numeric ordinals (`1`, `2`) are NOT accepted by this endpoint — translate them via `prlist` first (see below).
+
+| `command` value | What it does | Returns |
+|---|---|---|
+| `"prlist"` | List all PRs in the repo | `{status:"Success", type:"list", pullRequests:[{id, branch, title, rating}]}` |
+| `"prcheck <id-or-branch>"` | Start a fresh async review | `{status:"Accepted", message:"..."}` — poll with prcheckstatus |
+| `"prcheckstatus <id-or-branch>"` | Get current state | See shapes below |
+| `"prcomments <id-or-branch>"` | Same as prcheckstatus (alias) | Same shape |
+
+### prcheckstatus response shapes
+
+**Review still running:**
+```json
+{ "status": "Accepted", "message": "Review still in progress for <branch>..." }
 ```
-Generate a key from the GrepLoop UI → Settings → API Keys. If no key is configured, tell the user to create one. The CLI (`scripts/greploop.mjs`) and pre-push hook read it from `GREPLOOP_API_KEY`. Legacy `gl_mcp_` keys still work.
 
-## Rating scale
-
-The GrepLoop review returns a rating from 1 to 10:
-- **8–10** — Production grade, safe to merge
-- **1–7** — Needs fixes. Loop with `/gloop fix` until it passes.
-
-## API endpoints
-
-All POST to `/api/command`. Body is JSON.
-
-**Start a review** — `{ "tool": "prcheck", "args": { "number": "5" } }` or `{ "args": { "repoId": "...", "branch": "..." } }`. Returns immediately; poll with `prcheckstatus`.
-
-**Poll a review** — `{ "tool": "prcheckstatus", "args": { "number": "5" } }`. Returns progress or the completed result.
-
-**Get persisted findings** — `{ "tool": "prcomments", "args": { "number": "5" } }`. Returns the latest saved findings without re-running.
-
-**List PRs** — `{ "tool": "prlist", "args": { "repoId": "..." } }`. Returns all PRs with their current ratings.
-
-Completed review response shape:
-```
+**Completed (cached or fresh):**
+```json
 {
   "status": "Success",
-  "rating": "8/10",
-  "productionGrade": "YES" | "NO",
-  "summary": "...",
-  "findings": [{
-    "category": "Security" | "Correctness" | "Performance" | "Accessibility" | "Style",
-    "severity": "blocker" | "warning" | "suggestion",
-    "filename": "src/foo.ts",
-    "line": 42,
-    "explanation": "...",
-    "diffSuggestion": "...",
-    "confidence": 0.0-1.0,
-    "evidenceChain": [{ "file": "...", "line": 88, "text": "..." }]
-  }]
+  "type": "status",
+  "productionScore": "7/10",
+  "reviewRun": {
+    "id": "run-...",
+    "commitHash": "abc1234...",
+    "rating": 7,             // numeric 1-10, or null if run failed
+    "model": "MiniMax-M3",
+    "completedAt": "2026-06-26T06:28:34.413Z"
+  },
+  "stale": false,            // true if diff has changed since this run
+  "rejectedCount": 0,        // findings filtered by verifier
+  "findingsCount": 4,
+  "findings": [              // pre-formatted strings, NOT objects
+    "[Correctness|warning] src/proxy.ts:40 — <explanation>",
+    "[Security|suggestion] src/foo.ts:123 — <explanation>"
+  ]
 }
 ```
+
+**No completed run yet:**
+```json
+{ "status": "Success", "message": "...\n_No completed ReviewRun yet._\n" }
+```
+The `message` field contains markdown; missing `reviewRun` field means no review has completed.
+
+### prlist response shape
+```json
+{
+  "status": "Success",
+  "type": "list",
+  "repoId": "...",
+  "pullRequests": [
+    { "id": "real-pr-...", "branch": "feature/x", "title": "...", "rating": "7/10" }
+  ]
+}
+```
+
+## Cache-aware review logic
+
+`prcheck` always starts a fresh scan (no cache check in this endpoint). To avoid burning 15+ minutes re-scanning unchanged code, ALWAYS do this first:
+
+1. Call `prcheckstatus <id>`.
+2. If `status === "Accepted"` (in progress) → poll every 15s until `status === "Success"`.
+3. If response has `reviewRun` and `stale === false` → return cached findings.
+4. If response has no `reviewRun`, OR `stale === true` → call `prcheck <id>` to start fresh, then poll.
 
 ## Subcommand protocols
 
 ### `/gloop` (list mode)
+1. Resolve repoId (see above). Stop if missing.
+2. POST `prlist`.
+3. Render PR list as a table. Number them 1..N (positional, for the user to reference as `/gloop <n>`).
+4. Save the id↔ordinal mapping in memory for the next call.
 
-1. Detect repo via `git remote get-url origin` (or current working dir), resolve via `GET /api/repos/resolve`.
-2. POST `prlist` with the resolved repoId.
-3. Render the PR list with ratings; ask the user to pick one or run `/gloop <number>`.
+### `/gloop <n>` (review mode)
+1. Resolve repoId.
+2. Translate `<n>` to a PR id: POST `prlist`, take `pullRequests[n-1].id`.
+3. Run the cache-aware review logic above.
+4. Render the rating, model, commitHash, and findings grouped by severity (blocker → warning → suggestion).
+5. If rating < 8, suggest `/gloop fix <n>`.
 
-### `/gloop <number>` (review mode)
+### `/gloop status <n>`
+1. Resolve repoId, translate ordinal → PR id.
+2. POST `prcheckstatus <id>`.
+3. If response has no `reviewRun`: tell user "No completed review yet — run `/gloop <n>` to start one."
+4. Otherwise render findings. Do NOT call `prcheck`.
 
-1. Detect repo, resolve repoId.
-2. POST `prcheck` with `{ number }` (or `{ repoId, branch }`).
-3. Poll `prcheckstatus` until `status` is `Success` (or `Failed`).
-4. Render the rating, summary, and findings with confidence scores. Group by severity.
+### `/gloop fix <n> [--once]`
+1. Resolve repoId, translate ordinal.
+2. Cache-aware review (see above). Wait for completion.
+3. If `reviewRun.rating >= 8` → report PASS, exit.
+4. For each findings string: parse `[Category|severity] file:line — explanation`, read the file at that line, apply a fix addressing the root cause (use the explanation as guidance — there's no diffSuggestion field in this API).
+5. `git add -A && git commit -m "fix: address <n> findings from /gloop fix"`.
+6. If `--once` → stop. Otherwise re-run cache-aware review (will be fresh since diff changed) and loop from step 3.
+7. Stop after 3 iterations with no rating improvement, or rating >= 8.
 
-### `/gloop status <number>`
+## Polling timing
 
-1. Detect repo, resolve repoId.
-2. POST `prcomments` with `{ number }`.
-3. Render the existing review without triggering a new scan. If no review exists yet, say so and suggest `/gloop <number>`.
-
-### `/gloop fix <number>` (and `--once`)
-
-1. **Get review** — POST `prcheck` with `{ number }`, poll `prcheckstatus` to completion.
-2. **Check rating** — If >= 8/10, report PASS and exit.
-3. **Filter findings** — Only act on findings with `confidence >= 0.5`. Skip noise.
-4. **Apply fixes** — For each finding: read the file at the reported line, understand the surrounding context, apply the `diffSuggestion` (or a reasonable fix that addresses the root cause).
-5. **Commit** — `git commit -am "fix: address review findings"`.
-6. **`--once` stops here.** Otherwise re-review via `prcheck` and loop from step 2.
-7. **Stop conditions** — rating >= 8/10, or 3+ iterations with no rating improvement (warn the user and stop).
-8. **Report** — Show the final rating and a summary of what was fixed.
+Full agentic scans take 5-25 min depending on PR size and model. Poll `prcheckstatus` every 15-30s. Don't poll faster — it spams the DB and doesn't speed anything up.
 
 ## Preconditions
 
-- GrepLoop dev server running (`npm run dev` from the GrepLoop repo).
-- Current repo registered in GrepLoop and indexed.
-- A PR exists for the current branch (or pass `<number>` explicitly).
-- `GREPLOOP_API_KEY` env var set, or pass via `Authorization: Bearer` header.
+- GrepLoop dev server running on port 3300 (`npm run dev` in the GrepLoop repo).
+- Current repo registered and indexed in GrepLoop.
+- `GREPLOOP_API_KEY` and `GREPLOOP_REPO_ID` env vars set (see "Resolving the repoId").
+- A PR exists for the current branch (or pass `<n>` explicitly to pick from the list).
