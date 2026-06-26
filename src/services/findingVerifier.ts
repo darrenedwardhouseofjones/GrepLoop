@@ -51,7 +51,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { prisma } from "@/src/lib/prisma";
-import { resolveSafePath } from "@/src/lib/pathSafety";
+import { safeReadFileSync } from "@/src/lib/pathSafety";
 import { getChatClient, getChatModel } from "@/src/lib/llmClient";
 
 export interface CandidateFinding {
@@ -263,21 +263,10 @@ function loadFileContent(
   // working tree but still in the diff) deferred to a follow-on — the
   // vast majority of findings cite files that still exist on disk.
   //
-  // filename is LLM-cited via submitReview — untrusted. Path traversal
-  // defense via resolveSafePath, which returns null if the candidate:
-  //   - is absolute (path.join would discard repoPath)
-  //   - contains .. that escapes the repo
-  //   - is a symlink pointing outside the repo
-  // A non-null return GUARANTEES the resolved path is inside repoPath —
-  // this IS the bound check. Without it, a prompt-injected LLM could
-  // submit "/etc/passwd" as filename.
-  const safePathInsideRepo = resolveSafePath(repoPath, filename);
-  if (safePathInsideRepo === null) return null;
-  try {
-    return fs.readFileSync(safePathInsideRepo, "utf-8");
-  } catch {
-    return null;
-  }
+  // filename is LLM-cited via submitReview — untrusted. safeReadFileSync
+  // resolves + opens + reads in one step with O_NOFOLLOW, closing the
+  // TOCTOU window that resolveSafePath + readFileSync would leave open.
+  return safeReadFileSync(repoPath, filename);
 }
 
 function extractCitedSymbols(explanation: string): string[] {

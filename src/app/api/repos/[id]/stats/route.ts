@@ -49,14 +49,19 @@ async function getEmbeddingStats(repoId: string): Promise<{ embeddingCoveragePct
   try {
     // `embedding` is a Prisma `Unsupported("vector")` column, so it can't be
     // filtered via the typed `where` — count it with raw SQL instead.
-    const [totalFiles, embedRows] = await Promise.all([
-      prisma.file.count({ where: { repoId } }),
+    const [embedRows, distinctFileRows, totalSymbols] = await Promise.all([
       prisma.$queryRaw<{ count: bigint }[]>`SELECT COUNT(*)::bigint AS count FROM "symbols" WHERE "repoId" = ${repoId} AND embedding IS NOT NULL`,
+      prisma.$queryRaw<{ count: bigint }[]>`SELECT COUNT(DISTINCT "filePath")::bigint AS count FROM "symbols" WHERE "repoId" = ${repoId} AND embedding IS NOT NULL`,
+      prisma.symbol.count({ where: { repoId } }),
     ]);
     const symbolsWithEmbeds = Number(embedRows[0]?.count ?? 0);
-    const totalSymbols = await prisma.symbol.count({ where: { repoId } });
+    // fileCountWithEmbeddings = distinct files containing at least one
+    // embedded symbol. Previously returned totalFiles (always equal to
+    // fileCount), which made the UI's "X/Y files" coverage line always
+    // render "Y/Y" — misleading. Now reflects actual file coverage.
+    const filesWithEmbeds = Number(distinctFileRows[0]?.count ?? 0);
     return {
-      fileCountWithEmbeddings: totalFiles,
+      fileCountWithEmbeddings: filesWithEmbeds,
       embeddingCoveragePct: totalSymbols > 0 ? Math.round((symbolsWithEmbeds / totalSymbols) * 100) : 0,
     };
   } catch {

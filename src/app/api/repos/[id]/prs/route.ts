@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/src/lib/prisma";
 import { getRealLocalPrs } from "@/src/lib/getRealLocalPrs";
+import { authenticateSessionOrKey } from "@/src/lib/apiAuth";
 
 /**
  * Map of in-flight refresh promises keyed by repo ID. Prevents the
@@ -22,6 +23,10 @@ const refreshPromises = new Map<string, Promise<any>>();
  * for an archived view.
  */
 export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
+  // Route-level auth: PR list is operator-private. proxy.ts is cookie-
+  // PRESENCE only — must validate the session.
+  const auth = await authenticateSessionOrKey(req);
+  if (!auth.ok) return NextResponse.json({ error: auth.error }, { status: 401 });
   try {
     const { id } = await params;
     const repo = await prisma.repository.findUnique({ where: { id } });
@@ -57,6 +62,10 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
  * when the user wants the freshest possible state.
  */
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
+  // Route-level auth: force-refresh is a write-ish op (re-runs git scan).
+  // proxy.ts is cookie-PRESENCE only — must validate the session.
+  const auth = await authenticateSessionOrKey(req);
+  if (!auth.ok) return NextResponse.json({ error: auth.error }, { status: 401 });
   try {
     const { id } = await params;
     const repo = await prisma.repository.findUnique({ where: { id } });

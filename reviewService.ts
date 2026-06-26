@@ -5,7 +5,7 @@ import { getChatChain } from "./src/lib/llmClient";
 import { randomUUID } from "node:crypto";
 import { verifyFindings, isDocumentationFile, type CandidateFinding } from "./src/services/findingVerifier";
 import { completeReviewRun } from "./src/lib/reviewFreshness";
-import { resolveSafePath } from "./src/lib/pathSafety";
+import { safeReadFileSync, resolveSafePath } from "./src/lib/pathSafety";
 import { runDeterministicChecks, type DeterministicFinding } from "./src/services/deterministicChecks";
 
 export interface ScanResult {
@@ -660,16 +660,21 @@ ${diffPayload}${deterministicPayload}`;
                   if (repo) {
                     const repoPath = repo.localPath || repo.path;
                     if (repoPath) {
-                      // Path-traversal + symlink-escape defense. Centralized
-                      // in pathSafety.ts so readFile, startBackgroundEnrichment,
-                      // and loadFileContent all share the same semantics.
-                      // A non-null return IS the bound check — resolveSafePath
-                      // rejects absolute paths, .. traversal, and symlinks
-                      // pointing outside the repo.
-                      const safePathInsideRepo = resolveSafePath(repoPath, fnArgs.filePath);
-                      if (safePathInsideRepo === null) {
-                        toolResult = "Error: Path traversal detected. Access to paths outside the repository is strictly forbidden.";
-                      } else if (fs.existsSync(safePathInsideRepo)) {
+                      // Path-traversal + symlink-escape + TOCTOU defense.
+                      // safeReadFileSync resolves + opens with O_NOFOLLOW +
+                      // reads in one atomic step, closing the window between
+                      // resolveSafePath returning and the caller calling
+                      // readFileSync that an attacker with write access
+                      // inside the repo could exploit.
+                      const content = safeReadFileSync(repoPath, fnArgs.filePath);
+                      if (content === null) {
+                        // Distinguish "path escaped" vs "file missing" via
+                        // a second resolveSafePath call (cheap; doesn't open).
+                        const escaped = resolveSafePath(repoPath, fnArgs.filePath) === null;
+                        toolResult = escaped
+                          ? "Error: Path traversal detected. Access to paths outside the repository is strictly forbidden."
+                          : "Error: File not found.";
+                      } else {
                         // Cumulative-context budget: refuse reads once the
                         // session has already pushed READFILE_BUDGET_CHARS
                         // into messages. Without this cap, an agentic loop
@@ -677,12 +682,11 @@ ${diffPayload}${deterministicPayload}`;
                         // readFile to balloon the context — every subsequent
                         // LLM call re-sends the accumulated bytes, blowing
                         // cost and the context window.
-                        readfileCharsThisScan += fs.readFileSync(safePathInsideRepo, "utf-8").length;
+                        readfileCharsThisScan += content.length;
                         if (readfileCharsThisScan > READFILE_BUDGET_CHARS) {
                           toolResult = `Error: Cumulative readFile budget (${READFILE_BUDGET_CHARS} chars) exceeded for this review. Use searchCodebase or grep for further exploration.`;
                           resultSummary = `blocked: budget exceeded`;
                         } else {
-                          const content = fs.readFileSync(safePathInsideRepo, "utf-8");
                           const addLineNumbers = (text: string) => text.split("\n").map((line, i) => `${i + 1}: ${line}`).join("\n");
                           // Truncate to 1000 lines max for safety
                           const lines = content.split("\n");
@@ -690,8 +694,6 @@ ${diffPayload}${deterministicPayload}`;
                           toolResult = addLineNumbers(truncLines.join("\n")) + (lines.length > 1000 ? "\n...[TRUNCATED]" : "");
                           resultSummary = `Read ${truncLines.length} lines from ${fnArgs.filePath}`;
                         }
-                      } else {
-                        toolResult = "Error: File not found.";
                       }
                     } else {
                       toolResult = "Error: Repository path not configured.";

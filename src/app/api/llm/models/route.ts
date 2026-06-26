@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { fetchRemoteModels, readPresets } from "@/src/lib/llmPresets";
+import { authenticateSessionOrKey } from "@/src/lib/apiAuth";
 
 /**
  * Proxies the model catalog from an OpenAI-compatible /v1/models endpoint.
@@ -11,6 +12,11 @@ import { fetchRemoteModels, readPresets } from "@/src/lib/llmPresets";
  * without re-entering the key in the masked UI).
  */
 export async function POST(req: Request) {
+  // Route-level auth: leaks preset endpoints + acts as connection test
+  // (any caller could enumerate which providers are configured). proxy.ts
+  // is cookie-PRESENCE only — must validate the session.
+  const auth = await authenticateSessionOrKey(req);
+  if (!auth.ok) return NextResponse.json({ error: auth.error }, { status: 401 });
   try {
     const body = await req.json().catch(() => ({}));
     const endpoint = typeof body.endpoint === "string" ? body.endpoint.trim() : "";

@@ -26,7 +26,7 @@ import { execFileSync } from "node:child_process";
 import { prisma } from "@/src/lib/prisma";
 import { currentHeadCommit } from "@/src/lib/indexFreshness";
 import { isSupportedFilePath } from "@/src/lib/treeSitter";
-import { resolveSafePath } from "@/src/lib/pathSafety";
+import { safeReadFileSync } from "@/src/lib/pathSafety";
 import { EmbeddingService } from "../embeddingService";
 
 import { parseFileSymbols as tsParseFileSymbols } from "./tsParser";
@@ -370,15 +370,14 @@ export class IndexingService {
         for (const sym of symbolsToEnrich) {
           // Defense-in-depth: sym.filePath comes from the indexer (relative
           // paths) but a future schema change or compromised DB write could
-          // inject an absolute path or `..` traversal. resolveSafePath
-          // returns null if the candidate is absolute, contains .. that
-          // escapes, or is a symlink pointing outside. A non-null return
-          // IS the bound check.
-          const safePathInsideRepo = resolveSafePath(resolvedPath, sym.filePath);
-          if (safePathInsideRepo === null) continue;
-          if (!fs.existsSync(safePathInsideRepo)) continue;
+          // inject an absolute path or `..` traversal. safeReadFileSync
+          // resolves + opens + reads with O_NOFOLLOW in one step, closing
+          // the TOCTOU window that resolveSafePath + readFileSync would
+          // leave open. Returns null if path escapes repo or read fails.
+          const sourceContent = safeReadFileSync(resolvedPath, sym.filePath);
+          if (sourceContent === null) continue;
 
-          const lines = fs.readFileSync(safePathInsideRepo, "utf-8").split("\n");
+          const lines = sourceContent.split("\n");
           const end = Math.min(sym.lineEnd, sym.lineStart + 300, lines.length);
           const sourceCode = lines
             .slice(Math.max(0, sym.lineStart - 1), end)
