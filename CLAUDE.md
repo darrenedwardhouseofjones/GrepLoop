@@ -120,9 +120,9 @@ only — never real credentials. `.greploop/` is also gitignored — it holds
 **Cause:** An Ollama package upgrade left the backend binary missing on this machine. Every embedding call fails, the indexing service keeps retrying, no vectors get written. `searchCodebase` / `findSimilar` tools return empty results — the LLM has diff-only context.
 
 **Fix (any of):**
-1. Configure an embedding preset that returns 1536 dimensions, matching `symbols.embedding vector(1536)`. Restart the dev server after changing providers.
+1. Configure an embedding preset that returns 1024 dimensions, matching `symbols.embedding vector(1024)` and the `EMBEDDING_DIM = 1024` constant in `src/services/embeddingService.ts`. (Was previously documented as 1536 — that was stale; current schema is 1024 to match `mxbai-embed-large`.) Restart the dev server after changing providers.
 2. Configure a compatible cloud embedding preset as either primary or fallback in LLM Settings. The circuit breaker auto-resets on the next process restart.
-3. If using Ollama, reinstall it with `curl -fsSL https://ollama.com/install.sh | sh`, then choose a local embedding model only if it returns 1536 dimensions.
+3. If using Ollama, reinstall it with `curl -fsSL https://ollama.com/install.sh | sh`, then choose a local embedding model only if it returns 1024 dimensions (e.g. `mxbai-embed-large`).
 
 **Why only one log line per session:** the embedding service has a module-level circuit breaker (`embeddingCircuitOpen`). Once all providers fail, subsequent calls return `[]` instantly and a single `console.error` is emitted with the remediation hint. Restart the dev server after fixing the underlying issue.
 
