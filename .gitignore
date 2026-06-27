@@ -32,3 +32,8 @@ opencode.json
 
 # Tree-sitter grammars (regenerated from node_modules by postinstall)
 public/grammars/
+
+# Agent-OS specs/commands — local working state, not part of the shipped app
+.agent-os/
+agent-os/
+.claude/commands/
