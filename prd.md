@@ -1,16 +1,16 @@
-# PRD: BugHunter — In-House Code Review Platform
+# PRD: Dragnet — In-House Code Review Platform
 
-**Status:** Draft v4 (pivots the wedge from privacy to cost + control + multi-LLM ensemble; renames GrepLoop → BugHunter)
+**Status:** Draft v4 (pivots the wedge from privacy to cost + control + multi-LLM ensemble)
 **Owner:** you
 **Target:** Engineers and small teams who want Greptile-tier review quality without Greptile's per-seat pricing, with the freedom to pick — or ensemble — any LLM.
 
-> **Rename note:** the codebase is mid-rename from GrepLoop to BugHunter. The agent's system prompt (`reviewService.ts`) already identifies as BugHunter. Package name, env vars (`GREPLOOP_API_KEY`), config dir (`.greploop/`), CLI script (`scripts/greploop.mjs`) will be migrated separately — see Open Questions §19.
+> **Rename note:** the codebase was renamed GrepLoop → Dragnet. Package name, env vars (`DRAGNET_API_KEY`), config dir (`.dragnet/`), CLI script (`scripts/dragnet.mjs`), API key prefix (`dr_`), and the `/dragnet` Claude Code skill are all migrated.
 
 ---
 
 ## 1. Summary
 
-**BugHunter** is a self-hosted code review platform that combines:
+**Dragnet** is a self-hosted code review platform that combines:
 
 1. **Full-codebase indexing** (tree-sitter → call graph → LLM summaries → vector embeddings) — the architectural decision that separates Greptile-tier review quality from diff-only reviewers.
 2. **An agentic review loop** — instead of one LLM call with pre-assembled context, an agent with tools (search the code graph, get callers, read git history) investigates the diff and produces findings backed by evidence chains.
@@ -30,7 +30,7 @@ Greptile and CodeRabbit provide context-aware code review as a hosted SaaS. The 
 - **No cross-model verification.** A single model's blind spots are baked in. There's no way to ask "what do three different frontier models agree is wrong with this PR?"
 - **Your review history lives in their database.** Export is an afterthought. Retention is their policy.
 
-BugHunter closes those gaps. Same review quality as Greptile, running on hardware you control, with the model choice and the cost curve in your hands.
+Dragnet closes those gaps. Same review quality as Greptile, running on hardware you control, with the model choice and the cost curve in your hands.
 
 **Where privacy lands in this pitch:** it's a side effect, not the headline. Code goes where you point it — to a cloud LLM provider if you configure one, nowhere if you don't. If keeping code fully off third-party networks matters to you, the pure-local deployment mode (§4) delivers it. If it doesn't, the hybrid modes are cheaper and faster.
 
@@ -38,7 +38,7 @@ BugHunter closes those gaps. Same review quality as Greptile, running on hardwar
 
 ## 3. The Wedge
 
-Three concrete things BugHunter does that Greptile/CodeRabbit can't or won't:
+Three concrete things Dragnet does that Greptile/CodeRabbit can't or won't:
 
 1. **No per-seat pricing, ever.** One install, unlimited repos, unlimited PRs, unlimited reviewers. The only cost curve is your LLM bill — and you control that by picking cheaper models for cheap diffs.
 2. **Multi-LLM ensemble reviews.** Run the same diff through Claude, GPT-4, and Gemini. Reconcile. This is the feature Greptile structurally cannot offer because they pick the model for you.
@@ -48,7 +48,7 @@ Three concrete things BugHunter does that Greptile/CodeRabbit can't or won't:
 
 ## 4. Deployment Modes
 
-BugHunter is deployed inside infrastructure you control. Four modes, picked per-repo at config time. All four are supported by the existing codebase — the schema is filesystem-path based, the LLM client is endpoint-agnostic.
+Dragnet is deployed inside infrastructure you control. Four modes, picked per-repo at config time. All four are supported by the existing codebase — the schema is filesystem-path based, the LLM client is endpoint-agnostic.
 
 | Mode | Repo source | LLM (chat) | Embeddings | What leaves the box |
 |---|---|---|---|---|
@@ -57,11 +57,11 @@ BugHunter is deployed inside infrastructure you control. Four modes, picked per-
 | **Remote repo + local LLM** | deploy-key clone | Ollama on server | Ollama on server | code clone (one-time + fetches) |
 | **Remote repo + cloud LLM** | deploy-key clone | OpenRouter / Anthropic / OpenAI | Ollama on server, or cloud | diff (and embeddings if cloud) |
 
-**Mode 1 — Pure local.** Point BugHunter at a folder containing `.git`. Run Ollama on the same machine. Nothing leaves the box. This is the simplest case and the most defensible "Greptile alternative that runs on my laptop" pitch.
+**Mode 1 — Pure local.** Point Dragnet at a folder containing `.git`. Run Ollama on the same machine. Nothing leaves the box. This is the simplest case and the most defensible "Greptile alternative that runs on my laptop" pitch.
 
 **Mode 2 — Local repo, cloud LLM.** Same as Mode 1 but the chat role hits a cloud endpoint. Code stays on disk; only the diff and retrieved context are sent to the LLM provider. This is the practical default for users without a local GPU (see §5).
 
-**Mode 3 — Remote repo, local LLM.** BugHunter runs on a server. Repos are cloned via GitHub deploy key (read-only, scoped per-repo, revocable). LLM is local Ollama. Code clones into your perimeter; nothing leaves for an LLM provider.
+**Mode 3 — Remote repo, local LLM.** Dragnet runs on a server. Repos are cloned via GitHub deploy key (read-only, scoped per-repo, revocable). LLM is local Ollama. Code clones into your perimeter; nothing leaves for an LLM provider.
 
 **Mode 4 — Remote repo, cloud LLM.** Same as Mode 3 but chat hits a cloud LLM. The closest analog to Greptile's architecture — but you pick the model, you pay the actual LLM cost (not a markup), and you can still ensemble.
 
@@ -76,7 +76,7 @@ A common assumption is that "self-hosted" implies running frontier models locall
 - **Chat / review role.** Frontier models (Claude Sonnet, GPT-4-class, GLM-5.2, MiniMax-M3) need serious hardware to run locally at review-grade speed — a high-end GPU or a workstation like NVIDIA's DGX Spark. Most users don't have that. For these users, the chat role should hit a cloud endpoint (OpenRouter, Anthropic, OpenAI). The cost is per-diff, typically cents to low dollars per PR.
 - **Embedding role.** Embedding models are much smaller than chat models and can often run locally on modest hardware. For the current schema, the selected embedding model must return 1536 dimensions to match `symbols.embedding vector(1536)`. Local embeddings are still preferred when a compatible model is available.
 
-**The hybrid (Mode 2 in §4) is the practical default for most users:** local repo, local embeddings, cloud LLM for the review itself. Code stays on disk; only the diff and retrieved context leave for the LLM provider; the cost curve is your actual LLM usage. This is fully supported by `src/lib/llmClient.ts` — chat and embedding roles are configured independently via `.greploop/llm-presets.json`.
+**The hybrid (Mode 2 in §4) is the practical default for most users:** local repo, local embeddings, cloud LLM for the review itself. Code stays on disk; only the diff and retrieved context leave for the LLM provider; the cost curve is your actual LLM usage. This is fully supported by `src/lib/llmClient.ts` — chat and embedding roles are configured independently via `.dragnet/llm-presets.json`.
 
 If you later acquire hardware capable of running frontier local models, flip the chat role to local Ollama and the cost curve drops to electricity.
 
@@ -89,7 +89,7 @@ This is the structural wedge against every commercial reviewer. They run one mod
 ### 6.1 The flow
 
 1. PR triggers review.
-2. BugHunter runs the full agent loop (§14) against N configured models in parallel — each model gets the same diff, same indexed context, same tools.
+2. Dragnet runs the full agent loop (§14) against N configured models in parallel — each model gets the same diff, same indexed context, same tools.
 3. Each model returns its own findings and rating as a `ReviewPass`.
 4. A reconciliation layer produces the final report:
    - **Agreement findings** (flagged by ≥2 models) → promoted to high confidence.
@@ -119,7 +119,7 @@ See §18 for the schema diff.
 
 | Term | Meaning |
 |---|---|
-| **Repository** | A git repository registered with BugHunter. Has a filesystem path (local clone or local-only repo). Belongs to one install. |
+| **Repository** | A git repository registered with Dragnet. Has a filesystem path (local clone or local-only repo). Belongs to one install. |
 | **Local PR** | A branch that differs from the configured base branch. Not a GitHub/GitLab PR object — there may be no remote at all. |
 | **Base branch** | The branch a local PR is diffed against (typically `main`), configurable per repo. |
 | **Review pass** | One execution of the agent loop against a diff snapshot, by one model. Multi-LLM ensemble runs N passes per review. |
@@ -132,20 +132,20 @@ See §18 for the schema diff.
 
 ## 8. Repo Sources
 
-A repo is registered with BugHunter by pointing it at a filesystem path containing `.git`. How the code got to that path is up to you:
+A repo is registered with Dragnet by pointing it at a filesystem path containing `.git`. How the code got to that path is up to you:
 
 ### 8.1 Local-only repo
-Folder initialised with `git init`. No remote configured. Fully local — commits, branches, diffs all work without ever pushing. BugHunter reads `.git/refs/heads` and `.git/logs/HEAD` directly. This is the default mode.
+Folder initialised with `git init`. No remote configured. Fully local — commits, branches, diffs all work without ever pushing. Dragnet reads `.git/refs/heads` and `.git/logs/HEAD` directly. This is the default mode.
 
 ### 8.2 Cloned repo (manual)
-You `git clone` a remote into a path visible to BugHunter. BugHunter reads the local clone; you handle `git fetch` yourself when you want fresh changes.
+You `git clone` a remote into a path visible to Dragnet. Dragnet reads the local clone; you handle `git fetch` yourself when you want fresh changes.
 
 ### 8.3 Cloned repo (deploy key, MVP target for remote-repo workflows)
-BugHunter manages the clone itself. You provide:
+Dragnet manages the clone itself. You provide:
 - Repo URL (e.g. `git@github.com:you/repo.git`)
 - Deploy key (SSH private key, registered at GitHub as a read-only deploy key for that repo)
 
-BugHunter clones into its working directory and runs `git fetch` on each review trigger. Read-only, scoped per-repo, revocable.
+Dragnet clones into its working directory and runs `git fetch` on each review trigger. Read-only, scoped per-repo, revocable.
 
 ### 8.4 GitHub App (post-MVP)
 Single install across many repos. Granular permissions. Audit trail. Polished but heavier setup.
@@ -159,7 +159,7 @@ Two independent roles, each configurable separately:
 - **Chat role** — drives the agent review loop. Pick based on quality and cost.
 - **Embedding role** — drives semantic search during indexing. Almost always fine to run locally.
 
-Configured via `.greploop/llm-presets.json` (gitignored, mode 0600). Each preset has: name, endpoint URL, API key, model identifier. Source of truth is `src/lib/llmPresets.ts`. Old `.env.local` LLM vars auto-migrate into one preset on first read.
+Configured via `.dragnet/llm-presets.json` (gitignored, mode 0600). Each preset has: name, endpoint URL, API key, model identifier. Source of truth is `src/lib/llmPresets.ts`. Old `.env.local` LLM vars auto-migrate into one preset on first read.
 
 **Supported endpoints (any OpenAI-compatible):**
 - Cloud: OpenRouter, Anthropic (via OpenAI-compatible proxy or direct SDK), OpenAI, Mistral, Together, Groq.
@@ -172,13 +172,13 @@ Configured via `.greploop/llm-presets.json` (gitignored, mode 0600). Each preset
 ## 10. Trigger Modes
 
 ### 10.1 Auto-inspect
-A filesystem/git watcher polls `.git/refs/heads` and `.git/logs/HEAD` for branch changes. When a qualifying branch is detected, BugHunter waits for a quiet period (default: 5 minutes of no new commits) before triggering review.
+A filesystem/git watcher polls `.git/refs/heads` and `.git/logs/HEAD` for branch changes. When a qualifying branch is detected, Dragnet waits for a quiet period (default: 5 minutes of no new commits) before triggering review.
 
 ### 10.2 Mention-triggered
 Three mechanisms, lowest friction first:
-1. **CLI / API** — `bughunter review <branch>` or the "Review now" button in the UI.
-2. **Marker file** — presence of `.bughunter-review` in the branch's working tree triggers review on the next watcher poll, then the marker is consumed.
-3. **Commit message marker** — a commit message containing `@BugHunter review` (configurable) triggers review of that branch.
+1. **CLI / API** — `dragnet review <branch>` or the "Review now" button in the UI.
+2. **Marker file** — presence of `.dragnet-review` in the branch's working tree triggers review on the next watcher poll, then the marker is consumed.
+3. **Commit message marker** — a commit message containing `@Dragnet review` (configurable) triggers review of that branch.
 
 ### 10.3 Pre-push hook
 Git pre-push hook (`scripts/hooks/pre-push`) calls `POST /api/hooks/prepush`, which runs `runPrScan()` and returns a pass/fail verdict. Blocks pushes that score below threshold (default: rating < 8/10). Bypass with `git push --no-verify`.
@@ -194,7 +194,7 @@ Parses every source file into an AST and extracts: function/method definitions (
 
 **Languages at MVP:** JavaScript, TypeScript, Python, PHP, Ruby, Go. Additional grammars installed on demand based on detected file extensions.
 
-**Limitations:** Tree-sitter is a parser, not a type-checker. It doesn't resolve types or dynamic call targets. BugHunter flags call sites it cannot statically resolve rather than silently dropping them.
+**Limitations:** Tree-sitter is a parser, not a type-checker. It doesn't resolve types or dynamic call targets. Dragnet flags call sites it cannot statically resolve rather than silently dropping them.
 
 **Non-negotiable:** v1 indexing must use real tree-sitter parsers, not regex or hand-rolled pattern matching. Regex extraction is acceptable only as throwaway scaffolding while wiring the rest of the pipeline. The Greptile-tier claim depends on stable AST node ranges, import/call-site structure, and repeatable symbol identity; regex parsing cannot provide enough precision for evidence validation or counter-evidence retrieval.
 
@@ -202,7 +202,7 @@ Parses every source file into an AST and extracts: function/method definitions (
 Directed graph with edges: `CALLS`, `IMPORTS`, `DEFINES`, `EXTENDS`, `OVERRIDES`. Edges store source location (file + line) so the agent can cite them precisely in evidence chains. Import resolution follows the language's module system; unresolvable imports are stored as unresolved edges.
 
 ### 11.3 Stage 3 — Docstring generation (LLM pass)
-For each function and class, BugHunter generates a natural-language summary if one doesn't already exist in source.
+For each function and class, Dragnet generates a natural-language summary if one doesn't already exist in source.
 
 **Why not embed raw source?** Vector search over raw source is syntactically biased — it finds code that *looks* similar, not code that *does* similar things. Embedding natural-language descriptions produces far more semantically accurate retrieval. Same approach Greptile uses.
 
@@ -226,7 +226,7 @@ All index state lives in the same Postgres database as users, repos, and review 
 - One datastore for everything — no separate SQLite/Vector DB to manage or back up.
 - Supabase provides pgvector out of the box; no extension install needed.
 - Transactional consistency — when a repo is deleted, its symbols/edges/files delete in the same transaction.
-- Postgres + pgvector handles codebases up to millions of symbols at BugHunter's query patterns. Beyond that, a dedicated vector DB (Qdrant, Weaviate) can slot in as a swap.
+- Postgres + pgvector handles codebases up to millions of symbols at Dragnet's query patterns. Beyond that, a dedicated vector DB (Qdrant, Weaviate) can slot in as a swap.
 
 ### 12.3 Incremental update strategy
 1. Filesystem watcher detects file changes.
@@ -240,7 +240,7 @@ First index of a large repo is the slow step (minutes to hours depending on size
 
 ## 13. Retrieval at Review Time
 
-When a diff arrives, BugHunter pulls the right slice of the codebase into the agent's context.
+When a diff arrives, Dragnet pulls the right slice of the codebase into the agent's context.
 
 ### 13.1 Seed extraction from the diff
 Changed file paths + changed line ranges → query `symbols` for symbols whose `(filePath, lineStart, lineEnd)` overlaps → seed symbol set.
@@ -282,7 +282,7 @@ submitReview(rating, summary, findings[])  terminal — ends the loop
 ```
 
 ### 14.3 Loop structure
-System prompt establishes the reviewer role and review criteria. User message contains the diff, pre-fetched context, and the mission. Loop runs up to 8 iterations: model emits tool calls, BugHunter executes them against the index, results go back to the model. Model terminates by calling `submitReview` with rating, summary, and findings.
+System prompt establishes the reviewer role and review criteria. User message contains the diff, pre-fetched context, and the mission. Loop runs up to 8 iterations: model emits tool calls, Dragnet executes them against the index, results go back to the model. Model terminates by calling `submitReview` with rating, summary, and findings.
 
 ### 14.4 Finding format
 ```
@@ -299,7 +299,7 @@ evidenceChain: [{file, line, text}, ...]   multi-hop trace
 Every finding must have at least one evidence entry — a specific file and line reference from the codebase that supports the claim. Findings the agent cannot support with evidence are discarded before report assembly.
 
 ### 14.5 Counter-evidence verification
-The review model produces **candidate findings**, not final findings. Before anything is persisted or shown as a blocker, BugHunter runs a verification pass that tries to disprove each claim.
+The review model produces **candidate findings**, not final findings. Before anything is persisted or shown as a blocker, Dragnet runs a verification pass that tries to disprove each claim.
 
 For every candidate finding, the verifier must gather counter-evidence based on category and file type:
 
@@ -329,7 +329,7 @@ Publishing rules:
 - Findings with invalid file paths, nonexistent lines, or empty evidence chains are discarded.
 
 ### 14.6 Fallback behavior
-If no LLM is configured, the review returns no findings, `rating: null`, and an actionable `systemWarn` explaining that the chat model is unconfigured or unavailable. BugHunter must never silently fabricate procedural findings in normal operation. Any demo findings must be gated behind an explicit `DEMO_MODE=true` flag and visually labeled as demo output.
+If no LLM is configured, the review returns no findings, `rating: null`, and an actionable `systemWarn` explaining that the chat model is unconfigured or unavailable. Dragnet must never silently fabricate procedural findings in normal operation. Any demo findings must be gated behind an explicit `DEMO_MODE=true` flag and visually labeled as demo output.
 
 ### 14.7 Current implementation gap audit
 As of 2026-06-24, the current codebase is aligned with the PRD architecture but not yet compliant with the PRD bar:
@@ -384,7 +384,7 @@ Every rendered finding also includes counter-evidence status:
 Each category can be toggled per-repo.
 
 - **Correctness** — logic errors, off-by-one, unhandled errors, null/type safety gaps, test coverage gaps for changed logic.
-- **Security (OWASP-aligned)** — injection risks, broken access control, crypto flaws, hardcoded secrets, SSRF, path traversal. *BugHunter is not OWASP-certified tooling; findings are a first pass, not a security audit.*
+- **Security (OWASP-aligned)** — injection risks, broken access control, crypto flaws, hardcoded secrets, SSRF, path traversal. *Dragnet is not OWASP-certified tooling; findings are a first pass, not a security audit.*
 - **Performance** — N+1 queries, unbounded loops on user input, blocking operations on request paths, Core Web Vitals patterns (web projects).
 - **Accessibility (web projects only)** — missing alt text, non-semantic interactive elements, missing form labels, heading hierarchy skips.
 - **Style & maintainability** — inconsistent naming, oversized functions/files relative to codebase norms, dead code introduced by the diff.
@@ -467,7 +467,7 @@ For single-model reviews (the current default), one `ReviewPass` is created per 
 
 ## 19. Open Questions
 
-- **Codebase rename logistics.** `package.json` name, `GREPLOOP_API_KEY` env var, `.greploop/` config dir, `scripts/greploop.mjs` CLI, `src/lib/llmPresets.ts` migration logic that reads `.greploop/`. Need a migration plan that doesn't break existing installs — likely read-old-if-new-doesn't-exist for one release.
+- **Codebase rename logistics.** `package.json` name, `DRAGNET_API_KEY` env var, `.dragnet/` config dir, `scripts/dragnet.mjs` CLI, `src/lib/llmPresets.ts` migration logic that reads `.dragnet/`. Need a migration plan that doesn't break existing installs — likely read-old-if-new-doesn't-exist for one release.
 - **Tree-sitter package strategy.** MVP should ship TypeScript/JavaScript tree-sitter first and add Python/Go/Rust/PHP/Ruby one at a time. Decide whether grammars are bundled in the Docker image or loaded as optional packages.
 - **Counter-evidence verifier storage.** Short term: store verifier status/counter-evidence inside `ReviewFinding.evidenceChain` JSON. Longer term: add explicit columns (`verificationStatus`, `counterEvidence`, `assumptions`) once the shape stabilizes.
 - **Ensemble reconciliation strategy.** Average ratings? Take the median? Surface the spread and let humans decide? Default should be "surface the spread" — averaging hides the most interesting signal. Needs empirical tuning once the feature ships.
@@ -490,7 +490,7 @@ For single-model reviews (the current default), one `ReviewPass` is created per 
 - Auto and mention trigger modes; pre-push git hook.
 - Cloud-API and local-Ollama backends, configurable per-repo, chat and embedding roles independent.
 - Web UI for browsing reports with evidence chains and history.
-- API key system for programmatic access (CLI, hooks, integrations). Bearer-auth keys (`gl_` prefix; legacy `gl_mcp_` keys still authenticate) gate `/api/command`, `/api/prcheck`, `/api/prcomments`, `/api/hooks/prepush`. The `/gloop` Claude Code skill drives the same endpoints via `GREPLOOP_API_KEY`.
+- API key system for programmatic access (CLI, hooks, integrations). Bearer-auth keys (`dr_` prefix; legacy `dr_mcp_` keys still authenticate) gate `/api/command`, `/api/prcheck`, `/api/prcomments`, `/api/hooks/prepush`. The `/dragnet` Claude Code skill drives the same endpoints via `DRAGNET_API_KEY`.
 
 **Out of scope for v1:**
 - Multi-LLM ensemble reconciliation UI (schema lands in v1, reconciliation logic + UI is Phase 1.5).

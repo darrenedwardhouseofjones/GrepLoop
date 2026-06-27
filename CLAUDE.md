@@ -1,4 +1,4 @@
-# GrepLoop
+# Dragnet
 
 Self-hosted multi-tenant code review platform (Greptile competitor).
 See `prd.md` for the full product spec.
@@ -10,7 +10,7 @@ See `prd.md` for the full product spec.
 - **Database:** Postgres on Supabase, accessed via Prisma 7.8 + `@prisma/adapter-pg`
 - **Styling:** Tailwind CSS 4
 - **Auth:** Better Auth (planned — multi-tenant via organization plugin)
-- **AI:** OpenAI-compatible endpoints (OpenRouter, Ollama, LM Studio) via `openai` SDK. Multiple provider presets stored in `.greploop/llm-presets.json` — pick a **primary + optional fallback** for each role (chat and embedding) independently. If the primary fails, the fallback is tried automatically; if both fail, reviews return empty findings + null rating + actionable banner (never templated/hallucinated output), and embeddings trip a session circuit breaker. Configure from the "LLM Settings" tab.
+- **AI:** OpenAI-compatible endpoints (OpenRouter, Ollama, LM Studio) via `openai` SDK. Multiple provider presets stored in `.dragnet/llm-presets.json` — pick a **primary + optional fallback** for each role (chat and embedding) independently. If the primary fails, the fallback is tried automatically; if both fail, reviews return empty findings + null rating + actionable banner (never templated/hallucinated output), and embeddings trip a session circuit breaker. Configure from the "LLM Settings" tab.
 
 ## Conventions
 
@@ -46,7 +46,7 @@ See `prd.md` for the full product spec.
   no findings + null rating + actionable `systemWarn`; embeddings trip a
   session-scoped `embeddingCircuitOpen` flag and return `[]` silently to
   avoid log spam.
-- LLM presets live in `.greploop/llm-presets.json` (gitignored, mode 0600).
+- LLM presets live in `.dragnet/llm-presets.json` (gitignored, mode 0600).
   Source of truth is `src/lib/llmPresets.ts`. The old `.env.local` LLM_*
   vars auto-migrate into one preset on first read; new code reads from the
   presets file, not env vars.
@@ -73,34 +73,34 @@ See `prd.md` for the full product spec.
 - `npm run start` — production server
 - `npm run lint` — `tsc --noEmit`
 - `npm run clean` — `rm -rf .next`
-- `npm run greploop` — `node scripts/greploop.mjs` (CLI companion: `npm run greploop install-hooks`, `npm run greploop review <branch>`)
+- `npm run dragnet` — `node scripts/dragnet.mjs` (CLI companion: `npm run dragnet install-hooks`, `npm run dragnet review <branch>`)
 - `npm run install-hooks` — installs the pre-push git hook into `.git/hooks/pre-push`
 - `npm run uninstall-hooks` — removes the pre-push git hook
 
 ## Pre-push hook
 
-The pre-push hook at `scripts/hooks/pre-push` blocks pushes that fail GrepLoop AI review (rating < 8/10). Installed via `npm run install-hooks` or `npm run greploop install-hooks`. Bypass with `git push --no-verify`.
+The pre-push hook at `scripts/hooks/pre-push` blocks pushes that fail Dragnet AI review (rating < 8/10). Installed via `npm run install-hooks` or `npm run dragnet install-hooks`. Bypass with `git push --no-verify`.
 
 The hook calls `POST /api/hooks/prepush` which triggers `runPrScan()` and returns a pass/fail verdict.
 
-Requires `GREPLOOP_API_KEY` env var (generate from UI sidebar → LLM Settings → API Keys). Set `GREPLOOP_URL` to override `http://localhost:3300`.
+Requires `DRAGNET_API_KEY` env var (generate from UI sidebar → LLM Settings → API Keys). Set `DRAGNET_URL` to override `http://localhost:3300`.
 
 ## API keys
 
-All authenticated endpoints (`/api/command`, `/api/prcheck`, `/api/prcomments`, `/api/hooks/prepush`) require an API key via the `Authorization: Bearer <key>` header. Keys are generated from the UI sidebar → LLM Settings → "API Keys" tab. New keys use the `gl_` prefix; legacy `gl_mcp_` keys continue to authenticate. Keys are hashed (SHA-256) at rest and can be revoked individually. The `scripts/greploop.mjs` CLI and `scripts/hooks/pre-push` hook read `GREPLOOP_API_KEY` from the environment.
+All authenticated endpoints (`/api/command`, `/api/prcheck`, `/api/prcomments`, `/api/hooks/prepush`) require an API key via the `Authorization: Bearer <key>` header. Keys are generated from the UI sidebar → LLM Settings → "API Keys" tab. New keys use the `dr_` prefix; legacy `dr_mcp_` keys continue to authenticate. Keys are hashed (SHA-256) at rest and can be revoked individually. The `scripts/dragnet.mjs` CLI and `scripts/hooks/pre-push` hook read `DRAGNET_API_KEY` from the environment.
 
 ## Agent skill
 
 One skill ships with the repo:
 
-- **`skills/gloop/SKILL.md`** — `/gloop` command family. Reviews PRs through the GrepLoop engine and reports findings with confidence scores. Rating 1-10; 8+ is production-grade.
-  - `/gloop` — list PRs for the current repo with ratings
-  - `/gloop <number>` — review a specific PR
-  - `/gloop status <number>` — show existing review results without re-scanning
-  - `/gloop fix <number>` — auto-fix loop: review → fix → re-review until 8/10
-  - `/gloop fix <number> --once` — single-pass fix, no loop
+- **`skills/dragnet/SKILL.md`** — `/dragnet` command family. Reviews PRs through the Dragnet engine and reports findings with confidence scores. Rating 1-10; 8+ is production-grade.
+  - `/dragnet` — list PRs for the current repo with ratings
+  - `/dragnet <number>` — review a specific PR
+  - `/dragnet status <number>` — show existing review results without re-scanning
+  - `/dragnet fix <number>` — auto-fix loop: review → fix → re-review until 8/10
+  - `/dragnet fix <number> --once` — single-pass fix, no loop
 
-Install to your user skills dir: `cp -r skills/gloop ~/.claude/skills/`. Remove any prior `~/.claude/skills/bughunter` and `~/.claude/skills/bugfixer` first — those are the old names and are no longer shipped.
+Install to your user skills dir: `cp -r skills/dragnet ~/.claude/skills/`. Remove any prior `~/.claude/skills/dragnet` and `~/.claude/skills/dragnet-fixer` first — those are the old names and are no longer shipped.
 
 ## Database
 
@@ -110,12 +110,12 @@ After schema changes, run `npx prisma db push` (dev) or create a migration.
 ## What NOT to commit
 
 `.env*` is gitignored except `.env.example`, which must contain placeholders
-only — never real credentials. `.greploop/` is also gitignored — it holds
-`.greploop/llm-presets.json` which contains API keys.
+only — never real credentials. `.dragnet/` is also gitignored — it holds
+`.dragnet/llm-presets.json` which contains API keys.
 
 ## Troubleshooting
 
-**Symptom:** `/tmp/greploop-dev.log` shows `Failed to generate embedding: 500 error starting llama-server: llama-server binary not found` every few seconds.
+**Symptom:** `/tmp/dragnet-dev.log` shows `Failed to generate embedding: 500 error starting llama-server: llama-server binary not found` every few seconds.
 
 **Cause:** An Ollama package upgrade left the backend binary missing on this machine. Every embedding call fails, the indexing service keeps retrying, no vectors get written. `searchCodebase` / `findSimilar` tools return empty results — the LLM has diff-only context.
 
@@ -134,11 +134,11 @@ only — never real credentials. `.greploop/` is also gitignored — it holds
 
 **Symptom:** PR review returns empty findings with a banner like "Model X ended the agentic loop without calling submitReview".
 
-**Cause:** the model ran but never produced a `submitReview` tool call. Usually means the model doesn't support function calling, or the model is too small to follow the agentic loop. Tail `/tmp/greploop-dev.log` for `[review] iteration N/8` + `[review] tool …` + `[review] loop exited without submitReview` lines to confirm.
+**Cause:** the model ran but never produced a `submitReview` tool call. Usually means the model doesn't support function calling, or the model is too small to follow the agentic loop. Tail `/tmp/dragnet-dev.log` for `[review] iteration N/8` + `[review] tool …` + `[review] loop exited without submitReview` lines to confirm.
 
 **Fix:** switch to a model that supports function calling (most OpenRouter chat models do; some local Ollama models don't).
 
-**Symptom:** Indexing completes but `Symbol` / `Edge` rows are empty, and `/tmp/greploop-dev.log` shows `[indexing] skipping <file>: no grammar yet (v1 supports .ts/.tsx/.js/.jsx)` for every file.
+**Symptom:** Indexing completes but `Symbol` / `Edge` rows are empty, and `/tmp/dragnet-dev.log` shows `[indexing] skipping <file>: no grammar yet (v1 supports .ts/.tsx/.js/.jsx)` for every file.
 
 **Cause:** `npm install` ran without the `postinstall` hook (or the hook failed silently), so `public/grammars/*.wasm` is missing. `treeSitter.ts` falls back to `node_modules/tree-sitter-typescript/` but in some bundler/CWD configurations that path isn't reachable at parse time.
 

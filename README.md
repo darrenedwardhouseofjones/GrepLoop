@@ -1,4 +1,4 @@
-# GrepLoop
+# Dragnet
 
 Self-hosted, multi-tenant code review platform. The Greptile-tier review quality (full-codebase indexing + agentic review loop) without pushing source code to a third-party SaaS.
 
@@ -41,7 +41,7 @@ Self-hosted, multi-tenant code review platform. The Greptile-tier review quality
    ```bash
    cp .env.example .env.local
    ```
-   Required: `DATABASE_URL`, `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`. Configure LLM providers at runtime from the **LLM Settings** tab (writes to `.greploop/llm-presets.json`, mode 0600; changes take effect on the next request — no restart). A primary and optional fallback provider can be configured for each of chat and embedding; if both fail, the review returns empty findings with an actionable banner (never fabricated output).
+   Required: `DATABASE_URL`, `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`. Configure LLM providers at runtime from the **LLM Settings** tab (writes to `.dragnet/llm-presets.json`, mode 0600; changes take effect on the next request — no restart). A primary and optional fallback provider can be configured for each of chat and embedding; if both fail, the review returns empty findings with an actionable banner (never fabricated output).
 
 3. **Generate the Prisma client and push the schema:**
    ```bash
@@ -55,7 +55,7 @@ Self-hosted, multi-tenant code review platform. The Greptile-tier review quality
    ```
    Open http://localhost:3300.
 
-The in-app **DB Config** tab lets you re-test and re-save the database connection without editing `.env.local` by hand. The **LLM Settings** tab lets you point GrepLoop at any OpenAI-compatible endpoint (OpenRouter, Ollama, LM Studio), browse the live model catalog, and configure a **primary + optional fallback** provider for each role (chat + embedding). When the primary fails, the fallback is tried automatically — if both fail, reviews return empty findings + null rating with an actionable banner, and embeddings trip a session circuit breaker to avoid log spam.
+The in-app **DB Config** tab lets you re-test and re-save the database connection without editing `.env.local` by hand. The **LLM Settings** tab lets you point Dragnet at any OpenAI-compatible endpoint (OpenRouter, Ollama, LM Studio), browse the live model catalog, and configure a **primary + optional fallback** provider for each role (chat + embedding). When the primary fails, the fallback is tried automatically — if both fail, reviews return empty findings + null rating with an actionable banner, and embeddings trip a session circuit breaker to avoid log spam.
 
 ---
 

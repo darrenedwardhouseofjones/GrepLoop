@@ -1,5 +1,5 @@
 
-Session review of the GrepLoop workflow (self-hosted Greptile/CodeRabbit
+Session review of the Dragnet workflow (self-hosted Greptile/CodeRabbit
 alternative). Covers one UI fix delivered this session plus a full
 end-to-end review of the PR-review pipeline with prioritized issues.
 
@@ -44,7 +44,7 @@ via `authenticateApiRequest`). High-value open endpoints:
 
 | Endpoint | Unauth impact |
 |---|---|
-| `POST /api/keys` | Mint a valid `gl_` API key, then use the "authed" API-key endpoints |
+| `POST /api/keys` | Mint a valid `dr_` API key, then use the "authed" API-key endpoints |
 | `PUT /api/llm/presets` | Repoint chat/embedding endpoint → exfiltrate reviewed code; inject key |
 | `POST /api/db/config` | Rewrite DB connection string in `.env.local` |
 | `GET /api/fs/list` | Browse the server filesystem |
@@ -220,7 +220,7 @@ Docs updated:
 
 Adopted verification rule:
 
-> The review model produces candidate findings. BugHunter only publishes a
+> The review model produces candidate findings. Dragnet only publishes a
 > final finding after local counter-evidence has been gathered and the finding
 > has been classified as `confirmed`, `likely`, `partially_mitigated`,
 > `needs_verification`, or `false_positive`.
