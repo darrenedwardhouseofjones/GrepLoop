@@ -1,15 +1,16 @@
 #!/bin/sh
-# GrepLoop pre-push hook
-# Installed by: npm run install-hooks  or  npm run greploop install-hooks
+# Dragnet pre-push hook
+# Installed by: npm run install-hooks  or  npm run dragnet install-hooks
 #
-# Blocks pushes that fail the GrepLoop AI review (rating < 8/10).
+# Blocks pushes that fail the Dragnet AI review (rating < 8/10).
 # Bypass with: git push --no-verify
 #
-# Reads branch info from git's pre-push stdin and calls the GrepLoop API.
+# Reads branch info from git's pre-push stdin and calls the Dragnet API.
 #
 # Configuration (set these in your shell/profile or .env):
-#   DRAGNET_URL   - default: http://localhost:3300
-#   DRAGNET_API_KEY - your API key from the GrepLoop UI
+#   DRAGNET_URL      - default: http://localhost:3300
+#   DRAGNET_API_KEY  - your key from Dragnet UI → LLM Settings → API Keys
+#                      (or written to .dragnet/cred.json by the install modal)
 
 DRAGNET_URL="${DRAGNET_URL:-http://localhost:3300}"
 DRAGNET_API_KEY="${DRAGNET_API_KEY:-}"
@@ -19,9 +20,15 @@ if [ -z "$REPO_PATH" ]; then
   exit 0
 fi
 
+# Fall back to .dragnet/cred.json if the env var isn't set (non-interactive
+# shells don't source ~/.zshrc, so this is how agents and CI authenticate).
+if [ -z "$DRAGNET_API_KEY" ] && [ -f "$REPO_PATH/.dragnet/cred.json" ]; then
+  DRAGNET_API_KEY=$(jq -r .key "$REPO_PATH/.dragnet/cred.json" 2>/dev/null)
+fi
+
 if [ -z "$DRAGNET_API_KEY" ]; then
-  echo "⚠ GrepLoop: DRAGNET_API_KEY not set. Generate a key from GrepLoop UI → LLM Settings → API Keys."
-  echo "  Then: export DRAGNET_API_KEY='dr_...'"
+  echo "⚠ Dragnet: no API key. Set \$DRAGNET_API_KEY or write .dragnet/cred.json"
+  echo "  Generate one from Dragnet UI → LLM Settings → API Keys."
   echo "  Push blocked. Set the key or use --no-verify to bypass."
   exit 1
 fi
@@ -51,25 +58,25 @@ while read local_ref local_sha remote_ref remote_sha; do
 
   if [ -n "$size_label" ]; then
     if [ -n "$size_message" ]; then
-      echo "GrepLoop size: $size_label - $size_message"
+      echo "Dragnet size: $size_label - $size_message"
     else
-      echo "GrepLoop size: $size_label"
+      echo "Dragnet size: $size_label"
     fi
   fi
 
   if [ "$passed" = "true" ]; then
-    echo "✓ GrepLoop: branch '$branch' approved ($rating/10)"
+    echo "✓ Dragnet: branch '$branch' approved ($rating/10)"
   elif [ -n "$error" ]; then
-    echo "⚠ GrepLoop: $error"
+    echo "⚠ Dragnet: $error"
     exit 1
   elif [ -n "$message" ]; then
     echo "$message"
-    echo "  Review findings in the GrepLoop UI or run '/greploop fix' in your agent."
+    echo "  Review findings in the Dragnet UI or run '/dragnet fix' in your agent."
     echo "  To bypass: git push --no-verify"
     exit 1
   else
-    echo "✗ GrepLoop: branch '$branch' blocked ($rating/10 — needs 8+)"
-    echo "  Review findings in the GrepLoop UI or run '/greploop fix' in your agent."
+    echo "✗ Dragnet: branch '$branch' blocked ($rating/10 — needs 8+)"
+    echo "  Review findings in the Dragnet UI or run '/dragnet fix' in your agent."
     echo "  To bypass: git push --no-verify"
     exit 1
   fi
