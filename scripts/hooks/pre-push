@@ -8,20 +8,20 @@
 # Reads branch info from git's pre-push stdin and calls the GrepLoop API.
 #
 # Configuration (set these in your shell/profile or .env):
-#   GREPLOOP_URL   - default: http://localhost:3300
-#   GREPLOOP_API_KEY - your API key from the GrepLoop UI
+#   DRAGNET_URL   - default: http://localhost:3300
+#   DRAGNET_API_KEY - your API key from the GrepLoop UI
 
-GREPLOOP_URL="${GREPLOOP_URL:-http://localhost:3300}"
-GREPLOOP_API_KEY="${GREPLOOP_API_KEY:-}"
+DRAGNET_URL="${DRAGNET_URL:-http://localhost:3300}"
+DRAGNET_API_KEY="${DRAGNET_API_KEY:-}"
 REPO_PATH="$(git rev-parse --show-toplevel 2>/dev/null)"
 
 if [ -z "$REPO_PATH" ]; then
   exit 0
 fi
 
-if [ -z "$GREPLOOP_API_KEY" ]; then
-  echo "⚠ GrepLoop: GREPLOOP_API_KEY not set. Generate a key from GrepLoop UI → LLM Settings → API Keys."
-  echo "  Then: export GREPLOOP_API_KEY='gl_...'"
+if [ -z "$DRAGNET_API_KEY" ]; then
+  echo "⚠ GrepLoop: DRAGNET_API_KEY not set. Generate a key from GrepLoop UI → LLM Settings → API Keys."
+  echo "  Then: export DRAGNET_API_KEY='gl_...'"
   echo "  Push blocked. Set the key or use --no-verify to bypass."
   exit 1
 fi
@@ -37,9 +37,9 @@ while read local_ref local_sha remote_ref remote_sha; do
     continue
   fi
 
-  result=$(curl -s -m 300 "$GREPLOOP_URL/api/hooks/prepush" \
+  result=$(curl -s -m 300 "$DRAGNET_URL/api/hooks/prepush" \
     -H "Content-Type: application/json" \
-    -H "Authorization: Bearer $GREPLOOP_API_KEY" \
+    -H "Authorization: Bearer $DRAGNET_API_KEY" \
     -d "{\"branch\":\"$branch\",\"repoPath\":\"$REPO_PATH\",\"sha\":\"$local_sha\"}")
 
   passed=$(echo "$result" | grep -o '"passed":[^,}]*' | cut -d: -f2)

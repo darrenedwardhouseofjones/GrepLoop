@@ -67,7 +67,7 @@ function InstallModal({ tool, origin, apiKey, repoId, onClose }: { tool: ToolId;
         },
         {
           label: "Set your API key (used by the skill, CLI, and pre-push hook)",
-          command: `export GREPLOOP_API_KEY='${key}'`,
+          command: `export DRAGNET_API_KEY='${key}'`,
         },
       ],
     },
@@ -89,7 +89,7 @@ function InstallModal({ tool, origin, apiKey, repoId, onClose }: { tool: ToolId;
         },
         {
           label: "Set your API key (used by the skill, CLI, and pre-push hook)",
-          command: `export GREPLOOP_API_KEY='${key}'`,
+          command: `export DRAGNET_API_KEY='${key}'`,
         },
       ],
     },

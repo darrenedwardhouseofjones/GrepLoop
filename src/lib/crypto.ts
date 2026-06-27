@@ -10,12 +10,12 @@ interface KeyStore {
 function getKeyStore(): KeyStore {
   const g = globalThis as typeof globalThis & { __greploopCryptoKey?: KeyStore };
   if (!g.__greploopCryptoKey) {
-    const raw = process.env.GREPLOOP_MASTER_KEY;
-    if (!raw) throw new Error("GREPLOOP_MASTER_KEY is not set (32-byte, base64)");
+    const raw = process.env.DRAGNET_MASTER_KEY;
+    if (!raw) throw new Error("DRAGNET_MASTER_KEY is not set (32-byte, base64)");
     const masterKey = Buffer.from(raw, "base64");
     if (masterKey.length !== KEY_LEN) {
       throw new Error(
-        `GREPLOOP_MASTER_KEY must be ${KEY_LEN} bytes encoded as base64 (got ${masterKey.length} bytes)`,
+        `DRAGNET_MASTER_KEY must be ${KEY_LEN} bytes encoded as base64 (got ${masterKey.length} bytes)`,
       );
     }
     g.__greploopCryptoKey = { masterKey };

@@ -4,12 +4,12 @@ import crypto from "crypto";
 const masterKey = crypto.randomBytes(32).toString("base64");
 
 beforeAll(() => {
-  process.env.GREPLOOP_MASTER_KEY = masterKey;
+  process.env.DRAGNET_MASTER_KEY = masterKey;
 });
 
 beforeEach(() => {
   delete (globalThis as any).__greploopCryptoKey;
-  process.env.GREPLOOP_MASTER_KEY = masterKey;
+  process.env.DRAGNET_MASTER_KEY = masterKey;
 });
 
 async function getMod() {
@@ -33,7 +33,7 @@ describe("crypto", () => {
   });
 
   it("hasMasterKey returns false when key is missing", async () => {
-    delete process.env.GREPLOOP_MASTER_KEY;
+    delete process.env.DRAGNET_MASTER_KEY;
     const mod = await getMod();
     expect(mod.hasMasterKey()).toBe(false);
   });

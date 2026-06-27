@@ -124,7 +124,7 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
     const writingSecret = Boolean(deployKey || pat);
     if (writingSecret && !hasMasterKey()) {
       return NextResponse.json(
-        { error: "GREPLOOP_MASTER_KEY is not set. Cannot encrypt secrets." },
+        { error: "DRAGNET_MASTER_KEY is not set. Cannot encrypt secrets." },
         { status: 500 },
       );
     }

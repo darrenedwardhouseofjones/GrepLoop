@@ -140,7 +140,7 @@ export default function WebhookPrompt({ repoName, repoId, hasPat, onClose }: Pro
                 </button>
               </div>
               <p className="text-slate-500 mt-2 leading-relaxed">
-                Copy the tunnel URL it prints, set <code className="text-slate-400">GREPLOOP_PUBLIC_URL=https://xyz.trycloudflare.com</code> in
+                Copy the tunnel URL it prints, set <code className="text-slate-400">DRAGNET_PUBLIC_URL=https://xyz.trycloudflare.com</code> in
                 <code className="text-slate-400"> .env.local</code>, restart the server, then continue below.
               </p>
             </div>

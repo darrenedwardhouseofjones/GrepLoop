@@ -24,12 +24,12 @@ export async function enqueue(repoId: string): Promise<void> {
     let pat: string | undefined;
 
     if (repo.deployKeyCipher && repo.deployKeyIv && repo.deployKeyTag) {
-      if (!hasMasterKey()) throw new Error("GREPLOOP_MASTER_KEY is not set");
+      if (!hasMasterKey()) throw new Error("DRAGNET_MASTER_KEY is not set");
       deployKey = decryptSecret(repo.deployKeyCipher, repo.deployKeyIv, repo.deployKeyTag);
     }
 
     if (repo.patCipher && repo.patIv && repo.patTag) {
-      if (!hasMasterKey()) throw new Error("GREPLOOP_MASTER_KEY is not set");
+      if (!hasMasterKey()) throw new Error("DRAGNET_MASTER_KEY is not set");
       pat = decryptSecret(repo.patCipher, repo.patIv, repo.patTag);
     }
 

@@ -35,11 +35,11 @@ export async function setupWebhookWithPat(
   if (!repo.patCipher || !repo.patIv || !repo.patTag) {
     throw new Error(`Repository ${repoId} has no PAT stored`);
   }
-  if (!hasMasterKey()) throw new Error("GREPLOOP_MASTER_KEY is not set");
+  if (!hasMasterKey()) throw new Error("DRAGNET_MASTER_KEY is not set");
 
   const pat = decryptSecret(repo.patCipher, repo.patIv, repo.patTag);
   const provider = repo.provider || getProviderFromUrl(repo.cloneUrl || "", repo.cloneUrlHttps || undefined);
-  const targetUrl = opts?.targetUrl || `${process.env.GREPLOOP_PUBLIC_URL || "http://localhost:3300"}/api/webhooks/${provider}`;
+  const targetUrl = opts?.targetUrl || `${process.env.DRAGNET_PUBLIC_URL || "http://localhost:3300"}/api/webhooks/${provider}`;
   const secret = repo.webhookSecret || crypto.randomUUID();
   const apiUrl = getApiBase(provider);
   const { owner, repo: repoName } = parseOwnerRepo(repo.cloneUrlHttps || repo.cloneUrl || "");
@@ -124,7 +124,7 @@ export async function deleteWebhook(repoId: string): Promise<void> {
     });
     return;
   }
-  if (!hasMasterKey()) throw new Error("GREPLOOP_MASTER_KEY is not set");
+  if (!hasMasterKey()) throw new Error("DRAGNET_MASTER_KEY is not set");
 
   const pat = decryptSecret(repo.patCipher, repo.patIv, repo.patTag);
   const provider = repo.provider || getProviderFromUrl(repo.cloneUrl || "", repo.cloneUrlHttps || undefined);
@@ -168,7 +168,7 @@ export function getManualWebhookInstructions(repo: {
   provider?: string | null;
 }): string {
   const provider = repo.provider || getProviderFromUrl(repo.cloneUrl || "", repo.cloneUrlHttps || undefined);
-  const publicUrl = process.env.GREPLOOP_PUBLIC_URL || "http://localhost:3300";
+  const publicUrl = process.env.DRAGNET_PUBLIC_URL || "http://localhost:3300";
   const webhookUrl = `${publicUrl}/api/webhooks/${provider}`;
   const secret = repo.webhookSecret || "(generated automatically)";
 

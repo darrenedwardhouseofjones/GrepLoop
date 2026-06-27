@@ -16,7 +16,7 @@ import { authenticateSessionOrKey } from "@/src/lib/apiAuth";
  * `.greploop/{cred,llm-presets}.json` pattern.
  *
  * Failure is non-fatal — the repo still registers. The skill will surface
- * a clear "set GREPLOOP_REPO_ID" message if it can't read this file.
+ * a clear "set DRAGNET_REPO_ID" message if it can't read this file.
  */
 function writeRepoIdMarker(repoPath: string, repoId: string): void {
   try {
@@ -185,7 +185,7 @@ export async function POST(req: Request) {
 
     if (!hasMasterKey()) {
       return NextResponse.json(
-        { error: "GREPLOOP_MASTER_KEY is not set. Remote repo secrets cannot be encrypted." },
+        { error: "DRAGNET_MASTER_KEY is not set. Remote repo secrets cannot be encrypted." },
         { status: 500 },
       );
     }
