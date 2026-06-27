@@ -68,8 +68,8 @@ export default function App() {
             {isSidebarOpen ? <X size={20} /> : <Menu size={20} />}
           </button>
 
-          <div className="w-8 h-8 bg-cyan-500 rounded flex items-center justify-center text-black font-extrabold tracking-tighter" id="brand-logo-badge">
-            GL
+          <div className="w-8 h-8 bg-cyan-500 rounded flex items-center justify-center text-black font-extrabold tracking-tighter text-xs" id="brand-logo-badge">
+            DN
           </div>
 
           <div className="flex items-baseline gap-2">
