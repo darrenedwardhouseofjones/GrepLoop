@@ -48,12 +48,19 @@ The skill needs the Dragnet `repoId` for the current project. It's a string like
 
 Resolve in this order:
 1. Read `.dragnet/repo-id` in the current repo's root (written automatically when the repo was registered via the Dragnet UI). Use `git rev-parse --show-toplevel` to find the repo root, then read `<root>/.dragnet/repo-id`. Strip whitespace.
-2. Fall back to `DRAGNET_REPO_ID` env var if the marker file is missing (e.g. repo was registered before this feature shipped, or the directory was copied without `.dragnet/`).
-3. If neither yields a repoId, **stop and tell the user**: "No `.dragnet/repo-id` marker found. Re-register the repo in the Dragnet UI to write one, or set `DRAGNET_REPO_ID` manually." Do NOT call `/api/repos/resolve` — it requires a browser session cookie and 401s against an API key.
+2. Fall back to `.dragnet/cred.json` → `jq -r .repoId <root>/.dragnet/cred.json`. This file is written by the install modal and holds the same repoId as the marker.
+3. Fall back to `DRAGNET_REPO_ID` env var if both files are missing.
+4. If none yield a repoId, **stop and tell the user**: "No `.dragnet/repo-id` marker found. Re-register the repo in the Dragnet UI to write one, or set `DRAGNET_REPO_ID` manually." Do NOT call `/api/repos/resolve` — it requires a browser session cookie and 401s against an API key.
 
 ## Auth
 
-Every call needs `Authorization: Bearer dr_<key>`. Read it from `DRAGNET_API_KEY`. If unset, stop and tell the user: "Set `DRAGNET_API_KEY` — generate one from the Dragnet UI → Settings → API Keys."
+Every call needs `Authorization: Bearer dr_<key>`. Resolve the key in this order:
+
+1. `.dragnet/cred.json` at the repo root → `jq -r .key <root>/.dragnet/cred.json`. This file is written by the install modal and is what `mcp.sh` reads at runtime, so it's the canonical source.
+2. `$DRAGNET_API_KEY` env var as a fallback (interactive shells that have sourced `~/.zshrc`).
+3. If neither yields a key, **stop and tell the user**: "No API key in `.dragnet/cred.json` or `$DRAGNET_API_KEY`. Generate one from the Dragnet UI → Settings → API Keys."
+
+**Note for agents:** Claude Code's Bash tool runs commands in a non-interactive shell that does not source `~/.zshrc`, so `$DRAGNET_API_KEY` will typically be empty even if the user has exported it in their terminal. **Always try `.dragnet/cred.json` first** — it works across all execution contexts.
 
 ## API shape (legacy command endpoint)
 
