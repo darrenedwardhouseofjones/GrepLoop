@@ -11,6 +11,16 @@ export async function POST(request: Request) {
   const signature = request.headers.get("x-hub-signature-256") || "";
   const rawBody = await request.text();
 
+  // Reject requests with no signature header before any DB work — without this
+  // gate, an unauthenticated attacker can spam arbitrary clone_url values and
+  // force a per-request DB scan of every repo's cloneUrl/localPath/webhookSecret
+  // columns. Bots that don't bother forging an HMAC are turned away free; the
+  // per-repo secret check below still catches attackers who do send a fake
+  // signature. Full elimination would need a global DRAGNET_WEBHOOK_SECRET.
+  if (!signature) {
+    return NextResponse.json({ error: "Missing x-hub-signature-256 header" }, { status: 401 });
+  }
+
   let payload: any;
   try {
     payload = JSON.parse(rawBody);
