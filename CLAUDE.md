@@ -93,14 +93,14 @@ All authenticated endpoints (`/api/command`, `/api/prcheck`, `/api/prcomments`, 
 
 One skill ships with the repo:
 
-- **`skills/dragnet/SKILL.md`** — `/dragnet` command family. Reviews PRs through the Dragnet engine and reports findings with confidence scores. Rating 1-10; 8+ is production-grade.
+- **`.claude/skills/dragnet/SKILL.md`** — `/dragnet` command family. Reviews PRs through the Dragnet engine and reports findings with confidence scores. Rating 1-10; 8+ is production-grade.
   - `/dragnet` — list PRs for the current repo with ratings
   - `/dragnet <number>` — review a specific PR
   - `/dragnet status <number>` — show existing review results without re-scanning
   - `/dragnet fix <number>` — auto-fix loop: review → fix → re-review until 8/10
   - `/dragnet fix <number> --once` — single-pass fix, no loop
 
-Install to your user skills dir: `cp -r skills/dragnet ~/.claude/skills/`. Remove any prior `~/.claude/skills/dragnet` and `~/.claude/skills/dragnet-fixer` first — those are the old names and are no longer shipped.
+Install to your user skills dir: `cp -r .claude/skills/dragnet ~/.claude/skills/`. Remove any prior `~/.claude/skills/dragnet` and `~/.claude/skills/dragnet-fixer` first — those are the old names and are no longer shipped.
 
 ## Database
 
